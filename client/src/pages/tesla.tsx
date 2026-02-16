@@ -1,3 +1,4 @@
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -13,9 +14,19 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   Zap, ZapOff, MapPin, Trash2, Plus, Radio, Car, Shield, Navigation, Circle,
-  RefreshCw, Link2, Unlink,
+  RefreshCw, Link2, Unlink, Search,
 } from "lucide-react";
+import { MapContainer, TileLayer, Circle as LeafletCircle, Marker, useMapEvents, useMap } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import type { Geofence, Vehicle } from "@shared/schema";
+
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
+  iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png",
+  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
+});
 
 const geofenceFormSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -294,9 +305,29 @@ function TeslaConnectionCard() {
   );
 }
 
+function MapClickHandler({ onMapClick }: { onMapClick: (lat: number, lng: number) => void }) {
+  useMapEvents({
+    click(e) {
+      onMapClick(e.latlng.lat, e.latlng.lng);
+    },
+  });
+  return null;
+}
+
+function FlyToLocation({ lat, lng }: { lat: number; lng: number }) {
+  const map = useMap();
+  useEffect(() => {
+    map.flyTo([lat, lng], 15, { duration: 1 });
+  }, [lat, lng, map]);
+  return null;
+}
+
 function GeofenceManager() {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+  const [flyTo, setFlyTo] = useState<{ lat: number; lng: number } | null>(null);
 
   const { data: geofences, isLoading } = useQuery<Geofence[]>({
     queryKey: ["/api/geofences"],
@@ -313,6 +344,43 @@ function GeofenceManager() {
     },
   });
 
+  const selectedLat = form.watch("latitude");
+  const selectedLng = form.watch("longitude");
+  const selectedRadius = form.watch("radiusMeters");
+
+  const handleMapClick = useCallback((lat: number, lng: number) => {
+    form.setValue("latitude", parseFloat(lat.toFixed(6)));
+    form.setValue("longitude", parseFloat(lng.toFixed(6)));
+  }, [form]);
+
+  const handleSearch = useCallback(async () => {
+    if (!searchQuery.trim()) return;
+    setIsSearching(true);
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=1`
+      );
+      const data = await res.json();
+      if (data.length > 0) {
+        const lat = parseFloat(data[0].lat);
+        const lng = parseFloat(data[0].lon);
+        form.setValue("latitude", parseFloat(lat.toFixed(6)));
+        form.setValue("longitude", parseFloat(lng.toFixed(6)));
+        setFlyTo({ lat, lng });
+        if (!form.getValues("name")) {
+          const shortName = data[0].display_name.split(",")[0];
+          form.setValue("name", shortName);
+        }
+      } else {
+        toast({ title: "Location not found", description: "Try a different search term", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Search failed", description: "Could not search for location", variant: "destructive" });
+    } finally {
+      setIsSearching(false);
+    }
+  }, [searchQuery, form, toast]);
+
   const createMutation = useMutation({
     mutationFn: async (values: GeofenceFormValues) => {
       await apiRequest("POST", "/api/geofences", values);
@@ -320,6 +388,7 @@ function GeofenceManager() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/geofences"] });
       form.reset();
+      setFlyTo(null);
       toast({ title: "Geofence added" });
     },
     onError: (error: Error) => {
@@ -349,17 +418,147 @@ function GeofenceManager() {
           Geofences
         </CardTitle>
         <CardDescription>
-          Define locations to automatically classify trips. When a trip starts or ends within a geofence, it will be tagged accordingly.
+          Click the map or search for an address to set the geofence location. Existing geofences are shown as circles.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="space-y-4">
+        <div className="rounded-md overflow-hidden border" style={{ height: "350px" }} data-testid="geofence-map-container">
+          <MapContainer
+            center={[59.3293, 18.0686]}
+            zoom={12}
+            style={{ height: "100%", width: "100%" }}
+            scrollWheelZoom={true}
+          >
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+            <MapClickHandler onMapClick={handleMapClick} />
+            {flyTo && <FlyToLocation lat={flyTo.lat} lng={flyTo.lng} />}
+            {selectedLat && selectedLng && (
+              <>
+                <Marker position={[selectedLat, selectedLng]} />
+                <LeafletCircle
+                  center={[selectedLat, selectedLng]}
+                  radius={selectedRadius || 200}
+                  pathOptions={{ color: "#3b82f6", fillColor: "#3b82f6", fillOpacity: 0.15, weight: 2 }}
+                />
+              </>
+            )}
+            {geofences?.map((gf) => (
+              <LeafletCircle
+                key={gf.id}
+                center={[gf.latitude, gf.longitude]}
+                radius={gf.radiusMeters}
+                pathOptions={{
+                  color: gf.tripType === "business" ? "#22c55e" : "#f59e0b",
+                  fillColor: gf.tripType === "business" ? "#22c55e" : "#f59e0b",
+                  fillOpacity: 0.15,
+                  weight: 2,
+                  dashArray: "5,5",
+                }}
+              />
+            ))}
+          </MapContainer>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Input
+            placeholder="Search address (e.g. Stureplan, Stockholm)"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleSearch())}
+            data-testid="input-geofence-search"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={handleSearch}
+            disabled={isSearching}
+            data-testid="button-search-location"
+          >
+            <Search className="w-4 h-4" />
+          </Button>
+        </div>
+
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Name</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g. Office, Home" {...field} data-testid="input-geofence-name" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="tripType"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Trip Type</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-geofence-trip-type">
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="business">Business</SelectItem>
+                        <SelectItem value="private">Private</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <FormField
+                control={form.control}
+                name="radiusMeters"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Radius (meters)</FormLabel>
+                    <FormControl>
+                      <Input type="number" min={50} max={5000} {...field} data-testid="input-geofence-radius" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <div className="sm:col-span-2 flex items-end">
+                <p className="text-xs text-muted-foreground">
+                  Selected: {selectedLat?.toFixed(4)}, {selectedLng?.toFixed(4)}
+                </p>
+              </div>
+            </div>
+            <Button
+              type="submit"
+              disabled={createMutation.isPending}
+              data-testid="button-add-geofence"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              {createMutation.isPending ? "Adding..." : "Add Geofence"}
+            </Button>
+          </form>
+        </Form>
+
         {isLoading ? (
           <div className="space-y-2">
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
           </div>
         ) : geofences && geofences.length > 0 ? (
-          <div className="space-y-2">
+          <div className="space-y-2 border-t pt-4">
+            <p className="text-sm font-medium mb-2">Active Geofences</p>
             {geofences.map((gf) => (
               <div
                 key={gf.id}
@@ -390,106 +589,7 @@ function GeofenceManager() {
               </div>
             ))}
           </div>
-        ) : (
-          <div className="text-center py-6 text-sm text-muted-foreground">
-            <MapPin className="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <p>No geofences configured yet</p>
-            <p className="text-xs mt-1">Add locations like your office or home below</p>
-          </div>
-        )}
-
-        <div className="border-t pt-4">
-          <p className="text-sm font-medium mb-3">Add Geofence</p>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <FormField
-                  control={form.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Name</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. Office, Home" {...field} data-testid="input-geofence-name" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="tripType"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Trip Type</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl>
-                          <SelectTrigger data-testid="select-geofence-trip-type">
-                            <SelectValue />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="business">Business</SelectItem>
-                          <SelectItem value="private">Private</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <FormField
-                  control={form.control}
-                  name="latitude"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Latitude</FormLabel>
-                      <FormControl>
-                        <Input type="number" step="any" {...field} data-testid="input-geofence-lat" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="longitude"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Longitude</FormLabel>
-                      <FormControl>
-                        <Input type="number" step="any" {...field} data-testid="input-geofence-lon" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="radiusMeters"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Radius (m)</FormLabel>
-                      <FormControl>
-                        <Input type="number" {...field} data-testid="input-geofence-radius" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-              <Button
-                type="submit"
-                disabled={createMutation.isPending}
-                data-testid="button-add-geofence"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                {createMutation.isPending ? "Adding..." : "Add Geofence"}
-              </Button>
-            </form>
-          </Form>
-        </div>
+        ) : null}
       </CardContent>
     </Card>
   );

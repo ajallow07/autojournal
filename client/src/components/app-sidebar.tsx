@@ -1,6 +1,8 @@
 import { useLocation, Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { LayoutDashboard, Route, Plus, BarChart3, Car, Zap, Circle } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
+import { LayoutDashboard, Route, Plus, BarChart3, Car, Zap, Circle, User, LogOut } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Sidebar,
   SidebarContent,
@@ -21,6 +23,7 @@ const navItems = [
   { title: "Reports", url: "/reports", icon: BarChart3 },
   { title: "Vehicle", url: "/vehicle", icon: Car },
   { title: "Tesla", url: "/tesla", icon: Zap },
+  { title: "User Profile", url: "/profile", icon: User },
 ];
 
 function TeslaStatusIndicator() {
@@ -46,6 +49,10 @@ function TeslaStatusIndicator() {
 
 export function AppSidebar() {
   const [location] = useLocation();
+  const { user, logout } = useAuth();
+
+  const displayName = user ? [user.firstName, user.lastName].filter(Boolean).join(" ") || "User" : "";
+  const initials = user ? [user.firstName?.[0], user.lastName?.[0]].filter(Boolean).join("").toUpperCase() || "U" : "";
 
   return (
     <Sidebar>
@@ -88,9 +95,23 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter className="p-4 space-y-1">
+      <SidebarFooter className="p-4 space-y-3">
         <TeslaStatusIndicator />
-        <p className="text-xs text-muted-foreground">Stockholm, Sweden</p>
+        {user && (
+          <div className="flex items-center gap-3">
+            <Avatar className="w-8 h-8">
+              <AvatarImage src={user.profileImageUrl || undefined} alt={displayName} />
+              <AvatarFallback className="text-xs">{initials}</AvatarFallback>
+            </Avatar>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium truncate" data-testid="text-sidebar-user-name">{displayName}</p>
+              <p className="text-xs text-muted-foreground truncate">{user.email || ""}</p>
+            </div>
+            <a href="/api/logout" data-testid="button-sidebar-logout">
+              <LogOut className="w-3.5 h-3.5 text-muted-foreground" />
+            </a>
+          </div>
+        )}
       </SidebarFooter>
     </Sidebar>
   );

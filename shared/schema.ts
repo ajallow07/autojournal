@@ -3,8 +3,11 @@ import { pgTable, text, varchar, integer, real, timestamp, boolean, date } from 
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+export * from "./models/auth";
+
 export const vehicles = pgTable("vehicles", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
   name: text("name").notNull(),
   make: text("make").notNull(),
   model: text("model").notNull(),
@@ -16,6 +19,7 @@ export const vehicles = pgTable("vehicles", {
 
 export const trips = pgTable("trips", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
   vehicleId: varchar("vehicle_id").notNull().references(() => vehicles.id),
   date: date("date").notNull(),
   startTime: text("start_time"),
@@ -34,6 +38,7 @@ export const trips = pgTable("trips", {
 
 export const teslaConnections = pgTable("tesla_connections", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
   vehicleId: varchar("vehicle_id").references(() => vehicles.id),
   accessToken: text("access_token"),
   refreshToken: text("refresh_token"),
@@ -58,6 +63,7 @@ export const teslaConnections = pgTable("tesla_connections", {
 
 export const geofences = pgTable("geofences", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
   name: text("name").notNull(),
   latitude: real("latitude").notNull(),
   longitude: real("longitude").notNull(),

@@ -1,6 +1,5 @@
-import { eq, desc, asc, and, gte, lte, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/node-postgres";
-import pg from "pg";
+import { eq, desc, asc, and } from "drizzle-orm";
+import { db } from "./db";
 import {
   vehicles, trips, teslaConnections, geofences,
   type Vehicle, type InsertVehicle,
@@ -9,27 +8,26 @@ import {
   type Geofence, type InsertGeofence,
 } from "@shared/schema";
 
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-const db = drizzle(pool);
-
 export interface IStorage {
-  getVehicles(): Promise<Vehicle[]>;
+  getVehicles(userId: string): Promise<Vehicle[]>;
   getVehicle(id: string): Promise<Vehicle | undefined>;
   createVehicle(vehicle: InsertVehicle): Promise<Vehicle>;
   updateVehicle(id: string, vehicle: Partial<InsertVehicle>): Promise<Vehicle | undefined>;
 
-  getTrips(): Promise<Trip[]>;
+  getTrips(userId: string): Promise<Trip[]>;
   getTrip(id: string): Promise<Trip | undefined>;
   createTrip(trip: InsertTrip): Promise<Trip>;
   updateTrip(id: string, trip: Partial<InsertTrip>): Promise<Trip | undefined>;
   deleteTrip(id: string): Promise<boolean>;
 
-  getTeslaConnection(): Promise<TeslaConnection | undefined>;
+  getTeslaConnection(userId: string): Promise<TeslaConnection | undefined>;
+  getTeslaConnectionById(id: string): Promise<TeslaConnection | undefined>;
+  getAllActiveTeslaConnections(): Promise<TeslaConnection[]>;
   createTeslaConnection(conn: InsertTeslaConnection): Promise<TeslaConnection>;
   updateTeslaConnection(id: string, data: Partial<InsertTeslaConnection>): Promise<TeslaConnection | undefined>;
   deleteTeslaConnection(id: string): Promise<boolean>;
 
-  getGeofences(): Promise<Geofence[]>;
+  getGeofences(userId: string): Promise<Geofence[]>;
   getGeofence(id: string): Promise<Geofence | undefined>;
   createGeofence(geofence: InsertGeofence): Promise<Geofence>;
   updateGeofence(id: string, data: Partial<InsertGeofence>): Promise<Geofence | undefined>;
@@ -37,8 +35,8 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
-  async getVehicles(): Promise<Vehicle[]> {
-    return db.select().from(vehicles);
+  async getVehicles(userId: string): Promise<Vehicle[]> {
+    return db.select().from(vehicles).where(eq(vehicles.userId, userId));
   }
 
   async getVehicle(id: string): Promise<Vehicle | undefined> {
@@ -56,8 +54,8 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  async getTrips(): Promise<Trip[]> {
-    return db.select().from(trips).orderBy(desc(trips.date), desc(trips.createdAt));
+  async getTrips(userId: string): Promise<Trip[]> {
+    return db.select().from(trips).where(eq(trips.userId, userId)).orderBy(desc(trips.date), desc(trips.createdAt));
   }
 
   async getTrip(id: string): Promise<Trip | undefined> {
@@ -92,9 +90,18 @@ export class DatabaseStorage implements IStorage {
     return !!deleted;
   }
 
-  async getTeslaConnection(): Promise<TeslaConnection | undefined> {
-    const [conn] = await db.select().from(teslaConnections).limit(1);
+  async getTeslaConnection(userId: string): Promise<TeslaConnection | undefined> {
+    const [conn] = await db.select().from(teslaConnections).where(eq(teslaConnections.userId, userId)).limit(1);
     return conn;
+  }
+
+  async getTeslaConnectionById(id: string): Promise<TeslaConnection | undefined> {
+    const [conn] = await db.select().from(teslaConnections).where(eq(teslaConnections.id, id));
+    return conn;
+  }
+
+  async getAllActiveTeslaConnections(): Promise<TeslaConnection[]> {
+    return db.select().from(teslaConnections).where(eq(teslaConnections.isActive, true));
   }
 
   async createTeslaConnection(conn: InsertTeslaConnection): Promise<TeslaConnection> {
@@ -112,8 +119,8 @@ export class DatabaseStorage implements IStorage {
     return !!deleted;
   }
 
-  async getGeofences(): Promise<Geofence[]> {
-    return db.select().from(geofences).orderBy(asc(geofences.name));
+  async getGeofences(userId: string): Promise<Geofence[]> {
+    return db.select().from(geofences).where(eq(geofences.userId, userId)).orderBy(asc(geofences.name));
   }
 
   async getGeofence(id: string): Promise<Geofence | undefined> {

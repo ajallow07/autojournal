@@ -139,8 +139,8 @@ function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * c;
 }
 
-function findMatchingGeofence(lat: number, lon: number, geofences: Geofence[]): Geofence | undefined {
-  for (const gf of geofences) {
+function findMatchingGeofence(lat: number, lon: number, geofencesList: Geofence[]): Geofence | undefined {
+  for (const gf of geofencesList) {
     const dist = haversineDistance(lat, lon, gf.latitude, gf.longitude);
     if (dist <= gf.radiusMeters) return gf;
   }
@@ -172,15 +172,12 @@ async function reverseGeocode(lat: number, lon: number): Promise<string> {
 
 let pollingInterval: ReturnType<typeof setInterval> | null = null;
 
-export async function pollVehicleState(): Promise<{
+async function pollSingleConnection(connection: TeslaConnection): Promise<{
   status: string;
   driveState?: string;
   tripAction?: string;
 } | null> {
-  const connection = await storage.getTeslaConnection();
-  if (!connection || !connection.isActive || !connection.teslaVehicleId) {
-    return null;
-  }
+  if (!connection.isActive || !connection.teslaVehicleId) return null;
 
   try {
     const token = await getValidToken(connection);
@@ -222,7 +219,7 @@ export async function pollVehicleState(): Promise<{
 
       if (distance >= 0.1) {
         const endLocationName = lat && lon ? await reverseGeocode(lat, lon) : "Unknown";
-        const geofencesList = await storage.getGeofences();
+        const geofencesList = await storage.getGeofences(connection.userId);
 
         let tripType = "private";
         if (lat && lon) {
@@ -235,12 +232,13 @@ export async function pollVehicleState(): Promise<{
           }
         }
 
-        const vehicles = await storage.getVehicles();
-        const linkedVehicle = vehicles.find((v) => v.id === connection.vehicleId) || vehicles[0];
+        const userVehicles = await storage.getVehicles(connection.userId);
+        const linkedVehicle = userVehicles.find((v) => v.id === connection.vehicleId) || userVehicles[0];
         if (linkedVehicle) {
           const now = new Date();
           const startTime = connection.tripStartTime || now;
           await storage.createTrip({
+            userId: connection.userId,
             vehicleId: linkedVehicle.id,
             date: now.toISOString().split("T")[0],
             startTime: startTime.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" }),
@@ -270,8 +268,29 @@ export async function pollVehicleState(): Promise<{
     await storage.updateTeslaConnection(connection.id, updateData);
     return { status: "ok", driveState: currentDriveState };
   } catch (error: any) {
-    console.error("Tesla polling error:", error.message);
+    console.error(`Tesla polling error for user ${connection.userId}:`, error.message);
     return { status: "error" };
+  }
+}
+
+export async function pollVehicleStateForUser(userId: string): Promise<{
+  status: string;
+  driveState?: string;
+  tripAction?: string;
+} | null> {
+  const connection = await storage.getTeslaConnection(userId);
+  if (!connection) return null;
+  return pollSingleConnection(connection);
+}
+
+async function pollAllConnections() {
+  const connections = await storage.getAllActiveTeslaConnections();
+  for (const conn of connections) {
+    try {
+      await pollSingleConnection(conn);
+    } catch (err: any) {
+      console.error(`Polling error for connection ${conn.id}:`, err.message);
+    }
   }
 }
 
@@ -280,7 +299,7 @@ export function startPolling(intervalMs: number = 30000) {
   console.log(`Starting Tesla polling every ${intervalMs / 1000}s`);
   pollingInterval = setInterval(async () => {
     try {
-      await pollVehicleState();
+      await pollAllConnections();
     } catch (err: any) {
       console.error("Polling error:", err.message);
     }
@@ -296,8 +315,8 @@ export function stopPolling() {
 }
 
 export async function initTeslaPolling() {
-  const connection = await storage.getTeslaConnection();
-  if (connection?.isActive) {
+  const connections = await storage.getAllActiveTeslaConnections();
+  if (connections.length > 0) {
     startPolling();
   }
 }

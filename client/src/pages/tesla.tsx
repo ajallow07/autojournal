@@ -119,6 +119,19 @@ function TeslaConnectionCard() {
     },
   });
 
+  const registerMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/tesla/register");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({ title: "Partner registered", description: data.message });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Registration failed", description: error.message, variant: "destructive" });
+    },
+  });
+
   if (isLoading) {
     return (
       <Card>
@@ -164,19 +177,6 @@ function TeslaConnectionCard() {
       </Card>
     );
   }
-
-  const registerMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/tesla/register");
-      return res.json();
-    },
-    onSuccess: (data) => {
-      toast({ title: "Partner registered", description: data.message });
-    },
-    onError: (error: Error) => {
-      toast({ title: "Registration failed", description: error.message, variant: "destructive" });
-    },
-  });
 
   if (!status.connected) {
     return (

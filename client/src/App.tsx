@@ -13,6 +13,7 @@ import TripForm from "@/pages/trip-form";
 import TripDetail from "@/pages/trip-detail";
 import Reports from "@/pages/reports";
 import VehiclePage from "@/pages/vehicle";
+import TeslaPage from "@/pages/tesla";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -25,6 +26,7 @@ function Router() {
       <Route path="/trips/:id" component={TripDetail} />
       <Route path="/reports" component={Reports} />
       <Route path="/vehicle" component={VehiclePage} />
+      <Route path="/tesla" component={TeslaPage} />
       <Route component={NotFound} />
     </Switch>
   );

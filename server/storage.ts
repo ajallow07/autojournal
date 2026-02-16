@@ -2,9 +2,11 @@ import { eq, desc, asc, and, gte, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import {
-  vehicles, trips,
+  vehicles, trips, teslaConnections, geofences,
   type Vehicle, type InsertVehicle,
   type Trip, type InsertTrip,
+  type TeslaConnection, type InsertTeslaConnection,
+  type Geofence, type InsertGeofence,
 } from "@shared/schema";
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
@@ -21,6 +23,17 @@ export interface IStorage {
   createTrip(trip: InsertTrip): Promise<Trip>;
   updateTrip(id: string, trip: Partial<InsertTrip>): Promise<Trip | undefined>;
   deleteTrip(id: string): Promise<boolean>;
+
+  getTeslaConnection(): Promise<TeslaConnection | undefined>;
+  createTeslaConnection(conn: InsertTeslaConnection): Promise<TeslaConnection>;
+  updateTeslaConnection(id: string, data: Partial<InsertTeslaConnection>): Promise<TeslaConnection | undefined>;
+  deleteTeslaConnection(id: string): Promise<boolean>;
+
+  getGeofences(): Promise<Geofence[]>;
+  getGeofence(id: string): Promise<Geofence | undefined>;
+  createGeofence(geofence: InsertGeofence): Promise<Geofence>;
+  updateGeofence(id: string, data: Partial<InsertGeofence>): Promise<Geofence | undefined>;
+  deleteGeofence(id: string): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -76,6 +89,50 @@ export class DatabaseStorage implements IStorage {
 
   async deleteTrip(id: string): Promise<boolean> {
     const [deleted] = await db.delete(trips).where(eq(trips.id, id)).returning();
+    return !!deleted;
+  }
+
+  async getTeslaConnection(): Promise<TeslaConnection | undefined> {
+    const [conn] = await db.select().from(teslaConnections).limit(1);
+    return conn;
+  }
+
+  async createTeslaConnection(conn: InsertTeslaConnection): Promise<TeslaConnection> {
+    const [created] = await db.insert(teslaConnections).values(conn).returning();
+    return created;
+  }
+
+  async updateTeslaConnection(id: string, data: Partial<InsertTeslaConnection>): Promise<TeslaConnection | undefined> {
+    const [updated] = await db.update(teslaConnections).set(data).where(eq(teslaConnections.id, id)).returning();
+    return updated;
+  }
+
+  async deleteTeslaConnection(id: string): Promise<boolean> {
+    const [deleted] = await db.delete(teslaConnections).where(eq(teslaConnections.id, id)).returning();
+    return !!deleted;
+  }
+
+  async getGeofences(): Promise<Geofence[]> {
+    return db.select().from(geofences).orderBy(asc(geofences.name));
+  }
+
+  async getGeofence(id: string): Promise<Geofence | undefined> {
+    const [geofence] = await db.select().from(geofences).where(eq(geofences.id, id));
+    return geofence;
+  }
+
+  async createGeofence(geofence: InsertGeofence): Promise<Geofence> {
+    const [created] = await db.insert(geofences).values(geofence).returning();
+    return created;
+  }
+
+  async updateGeofence(id: string, data: Partial<InsertGeofence>): Promise<Geofence | undefined> {
+    const [updated] = await db.update(geofences).set(data).where(eq(geofences.id, id)).returning();
+    return updated;
+  }
+
+  async deleteGeofence(id: string): Promise<boolean> {
+    const [deleted] = await db.delete(geofences).where(eq(geofences.id, id)).returning();
     return !!deleted;
   }
 }

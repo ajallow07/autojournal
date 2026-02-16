@@ -1,5 +1,6 @@
 import { useLocation, Link } from "wouter";
-import { LayoutDashboard, Route, Plus, BarChart3, Car, Settings } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { LayoutDashboard, Route, Plus, BarChart3, Car, Zap, Circle } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -19,7 +20,29 @@ const navItems = [
   { title: "Add Trip", url: "/trips/new", icon: Plus },
   { title: "Reports", url: "/reports", icon: BarChart3 },
   { title: "Vehicle", url: "/vehicle", icon: Car },
+  { title: "Tesla", url: "/tesla", icon: Zap },
 ];
+
+function TeslaStatusIndicator() {
+  const { data } = useQuery<{ connected: boolean; connection: { lastDriveState: string | null; tripInProgress: boolean } | null }>({
+    queryKey: ["/api/tesla/status"],
+    refetchInterval: 30000,
+  });
+
+  if (!data?.connected) return null;
+
+  const conn = data.connection;
+  const isDriving = conn?.tripInProgress;
+
+  return (
+    <div className="flex items-center gap-2" data-testid="tesla-status-indicator">
+      <Circle className={`w-2 h-2 ${isDriving ? "fill-green-500 text-green-500 animate-pulse" : "fill-muted-foreground text-muted-foreground"}`} />
+      <span className="text-xs text-muted-foreground">
+        Tesla {isDriving ? "driving" : "connected"}
+      </span>
+    </div>
+  );
+}
 
 export function AppSidebar() {
   const [location] = useLocation();
@@ -65,7 +88,8 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter className="p-4">
+      <SidebarFooter className="p-4 space-y-1">
+        <TeslaStatusIndicator />
         <p className="text-xs text-muted-foreground">Stockholm, Sweden</p>
       </SidebarFooter>
     </Sidebar>

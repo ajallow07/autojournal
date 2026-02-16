@@ -28,13 +28,54 @@ export const trips = pgTable("trips", {
   tripType: text("trip_type").notNull().default("private"),
   purpose: text("purpose"),
   notes: text("notes"),
+  autoLogged: boolean("auto_logged").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const teslaConnections = pgTable("tesla_connections", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  vehicleId: varchar("vehicle_id").references(() => vehicles.id),
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  tokenExpiresAt: timestamp("token_expires_at"),
+  teslaVehicleId: text("tesla_vehicle_id"),
+  vin: text("vin"),
+  vehicleName: text("vehicle_name"),
+  isActive: boolean("is_active").notNull().default(false),
+  lastPolledAt: timestamp("last_polled_at"),
+  lastDriveState: text("last_drive_state"),
+  lastLatitude: real("last_latitude"),
+  lastLongitude: real("last_longitude"),
+  lastOdometer: real("last_odometer"),
+  tripInProgress: boolean("trip_in_progress").notNull().default(false),
+  tripStartTime: timestamp("trip_start_time"),
+  tripStartOdometer: real("trip_start_odometer"),
+  tripStartLatitude: real("trip_start_latitude"),
+  tripStartLongitude: real("trip_start_longitude"),
+  tripStartLocation: text("trip_start_location"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const geofences = pgTable("geofences", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  latitude: real("latitude").notNull(),
+  longitude: real("longitude").notNull(),
+  radiusMeters: integer("radius_meters").notNull().default(200),
+  tripType: text("trip_type").notNull().default("business"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 export const insertVehicleSchema = createInsertSchema(vehicles).omit({ id: true });
 export const insertTripSchema = createInsertSchema(trips).omit({ id: true, createdAt: true });
+export const insertTeslaConnectionSchema = createInsertSchema(teslaConnections).omit({ id: true, createdAt: true });
+export const insertGeofenceSchema = createInsertSchema(geofences).omit({ id: true, createdAt: true });
 
 export type InsertVehicle = z.infer<typeof insertVehicleSchema>;
 export type Vehicle = typeof vehicles.$inferSelect;
 export type InsertTrip = z.infer<typeof insertTripSchema>;
 export type Trip = typeof trips.$inferSelect;
+export type InsertTeslaConnection = z.infer<typeof insertTeslaConnectionSchema>;
+export type TeslaConnection = typeof teslaConnections.$inferSelect;
+export type InsertGeofence = z.infer<typeof insertGeofenceSchema>;
+export type Geofence = typeof geofences.$inferSelect;

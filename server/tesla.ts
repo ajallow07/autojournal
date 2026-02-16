@@ -19,7 +19,7 @@ function getClientSecret(): string {
 }
 
 function getRedirectUri(): string {
-  const host = process.env.REPLIT_DEV_DOMAIN || process.env.REPL_SLUG + "." + process.env.REPL_OWNER + ".repl.co";
+  const host = process.env.APP_DOMAIN || process.env.REPLIT_DEV_DOMAIN || process.env.REPL_SLUG + "." + process.env.REPL_OWNER + ".repl.co";
   return `https://${host}/api/tesla/callback`;
 }
 

@@ -19,7 +19,7 @@ export default function ProfilePage() {
 
   if (!user) return null;
 
-  const displayName = [user.firstName, user.lastName].filter(Boolean).join(" ") || "User";
+  const displayName = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.username || "User";
   const initials = [user.firstName?.[0], user.lastName?.[0]].filter(Boolean).join("").toUpperCase() || "U";
 
   return (

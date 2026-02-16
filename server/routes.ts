@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertVehicleSchema, insertTripSchema, insertGeofenceSchema } from "@shared/schema";
-import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
+import { setupAuth, isAuthenticated } from "./auth";
 import {
   getAuthUrl,
   exchangeCodeForTokens,
@@ -17,7 +17,7 @@ import crypto from "crypto";
 let pendingOAuthStates: Map<string, string> = new Map();
 
 function getUserId(req: any): string {
-  const userId = req.user?.claims?.sub;
+  const userId = req.user?.id;
   if (!userId) throw new Error("User ID not found in session");
   return userId;
 }
@@ -28,7 +28,6 @@ export async function registerRoutes(
 ): Promise<Server> {
 
   await setupAuth(app);
-  registerAuthRoutes(app);
 
   const patchVehicleSchema = insertVehicleSchema.partial();
   const patchTripSchema = insertTripSchema.partial();

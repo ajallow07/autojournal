@@ -1,19 +1,19 @@
 # Körjournal - Tesla Model Y Driver's Journal
 
 ## Overview
-A Swedish driver's journal (körjournal) application for logging and managing car trips for a Tesla Model Y based in Stockholm, Sweden. Supports multi-user authentication (Google, email, etc.), business/private trip classification, odometer tracking, comprehensive reports with CSV export, and Tesla API integration for automatic trip logging.
+A Swedish driver's journal (körjournal) application for logging and managing car trips for a Tesla Model Y based in Stockholm, Sweden. Supports multi-user authentication (Google OAuth, username/password), business/private trip classification, odometer tracking, comprehensive reports with CSV export, and Tesla API integration for automatic trip logging.
 
 ## Recent Changes
-- 2026-02-16: Added multi-user authentication via Replit Auth (supports Google, GitHub, Apple, email login)
+- 2026-02-16: Replaced Replit Auth with custom auth (username/password + Google OAuth via passport-local/passport-google-oauth20)
 - 2026-02-16: Added userId to all tables (vehicles, trips, tesla_connections, geofences) for multi-user data isolation
-- 2026-02-16: Added landing page for logged-out users, User Profile page
+- 2026-02-16: Added auth page with login/register form and Google OAuth button
 - 2026-02-16: Added Tesla API integration with OAuth flow, automatic trip detection, geofencing, and reverse geocoding
 - 2026-02-16: Initial MVP built with full CRUD for trips and vehicles, dashboard, trip log, reports, and vehicle settings
 
 ## Tech Stack
 - Frontend: React + Vite + TanStack Query + Wouter + Shadcn UI + Tailwind CSS
 - Backend: Express + Drizzle ORM + PostgreSQL
-- Auth: Replit Auth (OpenID Connect) with Passport.js
+- Auth: Custom auth with Passport.js (passport-local + passport-google-oauth20), bcrypt password hashing
 - Language: TypeScript
 
 ## Project Architecture
@@ -24,12 +24,12 @@ client/src/
     app-sidebar.tsx - Navigation sidebar with user profile and Tesla status
     theme-toggle.tsx - Dark/light mode toggle
   hooks/
-    use-auth.ts     - Authentication hook (useAuth)
+    use-auth.ts     - Authentication hook (useAuth) with login/register/logout mutations
   lib/
-    auth-utils.ts   - Auth error handling utilities
+    queryClient.ts  - TanStack Query client with apiRequest helper
     theme-provider.tsx - Theme context
   pages/
-    landing.tsx     - Landing page for logged-out users
+    auth-page.tsx   - Login/register page with Google OAuth button
     profile.tsx     - User Profile page with account info and logout
     dashboard.tsx   - Overview with stats and recent trips
     trip-log.tsx    - Filterable/searchable trip list
@@ -40,24 +40,27 @@ client/src/
     tesla.tsx       - Tesla connection, geofence management
 
 server/
+  auth.ts     - Custom auth module (passport-local, passport-google-oauth20, bcrypt, sessions)
   db.ts       - Shared database connection (drizzle + pg pool)
   routes.ts   - API endpoints with auth middleware
   storage.ts  - Database storage layer with userId filtering
   tesla.ts    - Tesla API service (multi-user polling, trip detection)
   seed.ts     - Database seeding (minimal)
-  replit_integrations/auth/ - Replit Auth module (OIDC, passport, sessions)
 
 shared/
   schema.ts       - Drizzle schema (all tables include userId column)
-  models/auth.ts  - Users and sessions tables for auth
+  models/auth.ts  - Users and sessions tables (username, passwordHash, googleId columns)
 ```
 
 ## Authentication
-- Replit Auth via OpenID Connect (supports Google, GitHub, Apple, email/password)
-- Auth routes: /api/login, /api/logout, /api/callback, /api/auth/user
+- Custom auth via Passport.js with two strategies:
+  - passport-local: username/password with bcrypt hashing (10 rounds)
+  - passport-google-oauth20: Direct Google OAuth (requires GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
+- Auth routes: POST /api/auth/register, POST /api/auth/login, GET /api/auth/google, GET /api/auth/google/callback, POST /api/auth/logout, GET /api/auth/user
 - All API routes protected with isAuthenticated middleware
 - Each user has isolated data (vehicles, trips, Tesla connections, geofences)
-- Sessions stored in PostgreSQL (sessions table)
+- Sessions stored in PostgreSQL (sessions table) with 1-week TTL
+- Required secrets: SESSION_SECRET (set), GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (optional, for Google login)
 
 ## API Endpoints (all require authentication)
 - GET/POST /api/vehicles, GET/PATCH /api/vehicles/:id
@@ -65,7 +68,8 @@ shared/
 - GET /api/tesla/status, GET /api/tesla/auth, GET /api/tesla/callback
 - POST /api/tesla/disconnect, POST /api/tesla/poll, POST /api/tesla/link-vehicle
 - GET/POST /api/geofences, PATCH/DELETE /api/geofences/:id
-- GET /api/auth/user (current authenticated user)
+- POST /api/auth/register, POST /api/auth/login, POST /api/auth/logout
+- GET /api/auth/user, GET /api/auth/google, GET /api/auth/google/callback
 
 ## Tesla Integration
 - OAuth 2.0 flow with Tesla Fleet API (EU endpoint: fleet-api.prd.eu.vn.cloud.tesla.com)
@@ -76,7 +80,7 @@ shared/
 - Trips marked with autoLogged=true when created by Tesla integration
 
 ## Key Features
-- Multi-user authentication with Google login support
+- Multi-user authentication with username/password and Google login
 - Manual and automatic trip logging with odometer, locations, time, and purpose
 - Business/private trip classification (manual or via geofences)
 - Monthly, custom period, and yearly overview reports

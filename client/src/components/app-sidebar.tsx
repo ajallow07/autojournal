@@ -51,8 +51,8 @@ export function AppSidebar() {
   const [location] = useLocation();
   const { user, logout } = useAuth();
 
-  const displayName = user ? [user.firstName, user.lastName].filter(Boolean).join(" ") || "User" : "";
-  const initials = user ? [user.firstName?.[0], user.lastName?.[0]].filter(Boolean).join("").toUpperCase() || "U" : "";
+  const displayName = user ? [user.firstName, user.lastName].filter(Boolean).join(" ") || user.username || "User" : "";
+  const initials = user ? [user.firstName?.[0], user.lastName?.[0]].filter(Boolean).join("").toUpperCase() || (user.username?.[0]?.toUpperCase() || "U") : "";
 
   return (
     <Sidebar>
@@ -107,9 +107,9 @@ export function AppSidebar() {
               <p className="text-xs font-medium truncate" data-testid="text-sidebar-user-name">{displayName}</p>
               <p className="text-xs text-muted-foreground truncate">{user.email || ""}</p>
             </div>
-            <a href="/api/logout" data-testid="button-sidebar-logout">
+            <button onClick={() => logout()} data-testid="button-sidebar-logout">
               <LogOut className="w-3.5 h-3.5 text-muted-foreground" />
-            </a>
+            </button>
           </div>
         )}
       </SidebarFooter>

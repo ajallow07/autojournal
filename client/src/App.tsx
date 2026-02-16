@@ -17,7 +17,7 @@ import Reports from "@/pages/reports";
 import VehiclePage from "@/pages/vehicle";
 import TeslaPage from "@/pages/tesla";
 import ProfilePage from "@/pages/profile";
-import LandingPage from "@/pages/landing";
+import AuthPage from "@/pages/auth-page";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -76,7 +76,7 @@ function AppContent() {
   }
 
   if (!isAuthenticated) {
-    return <LandingPage />;
+    return <AuthPage />;
   }
 
   return <AuthenticatedApp />;

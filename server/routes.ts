@@ -11,6 +11,7 @@ import {
   startPolling,
   stopPolling,
   initTeslaPolling,
+  registerPartnerAccount,
 } from "./tesla";
 import crypto from "crypto";
 
@@ -128,6 +129,16 @@ export async function registerRoutes(
         vehicleId: connection.vehicleId,
       } : null,
     });
+  });
+
+  app.post("/api/tesla/register", isAuthenticated, async (req, res) => {
+    try {
+      const result = await registerPartnerAccount();
+      res.json(result);
+    } catch (error: any) {
+      console.error("Tesla partner registration error:", error.message);
+      res.status(500).json({ message: error.message });
+    }
   });
 
   app.get("/api/tesla/auth", isAuthenticated, (req, res) => {

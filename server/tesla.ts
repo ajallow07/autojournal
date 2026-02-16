@@ -35,6 +35,46 @@ export function getAuthUrl(state: string): string {
   return `${TESLA_AUTH_URL}?${params.toString()}`;
 }
 
+export async function registerPartnerAccount(): Promise<{ success: boolean; message: string }> {
+  const tokenRes = await fetch(TESLA_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: getClientId(),
+      client_secret: getClientSecret(),
+      scope: "openid vehicle_device_data vehicle_location",
+      audience: TESLA_AUDIENCE,
+    }),
+  });
+
+  if (!tokenRes.ok) {
+    const err = await tokenRes.text();
+    throw new Error(`Failed to get partner token: ${err}`);
+  }
+
+  const tokenData = await tokenRes.json();
+  const domain = process.env.APP_DOMAIN || "autojournal.3ilights.com";
+
+  const regRes = await fetch(`${TESLA_API_BASE}/api/1/partner_accounts`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${tokenData.access_token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ domain }),
+  });
+
+  if (!regRes.ok) {
+    const err = await regRes.text();
+    throw new Error(`Partner registration failed (${regRes.status}): ${err}`);
+  }
+
+  const result = await regRes.json();
+  console.log("Tesla partner registration result:", JSON.stringify(result));
+  return { success: true, message: `Partner registered for domain: ${domain}` };
+}
+
 export async function exchangeCodeForTokens(code: string): Promise<{
   access_token: string;
   refresh_token: string;

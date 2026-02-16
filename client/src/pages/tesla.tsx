@@ -165,6 +165,19 @@ function TeslaConnectionCard() {
     );
   }
 
+  const registerMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/tesla/register");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({ title: "Partner registered", description: data.message });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Registration failed", description: error.message, variant: "destructive" });
+    },
+  });
+
   if (!status.connected) {
     return (
       <Card>
@@ -187,14 +200,28 @@ function TeslaConnectionCard() {
               <li>Reverse-geocode GPS coordinates to street addresses</li>
             </ul>
           </div>
-          <Button
-            onClick={() => connectMutation.mutate()}
-            disabled={connectMutation.isPending}
-            data-testid="button-connect-tesla"
-          >
-            <Zap className="w-4 h-4 mr-2" />
-            {connectMutation.isPending ? "Redirecting..." : "Connect Tesla Account"}
-          </Button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              onClick={() => connectMutation.mutate()}
+              disabled={connectMutation.isPending}
+              data-testid="button-connect-tesla"
+            >
+              <Zap className="w-4 h-4 mr-2" />
+              {connectMutation.isPending ? "Redirecting..." : "Connect Tesla Account"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => registerMutation.mutate()}
+              disabled={registerMutation.isPending}
+              data-testid="button-register-tesla"
+            >
+              <Shield className="w-4 h-4 mr-2" />
+              {registerMutation.isPending ? "Registering..." : "Register Partner Account"}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            If you get a region error, click "Register Partner Account" first, then try connecting again.
+          </p>
         </CardContent>
       </Card>
     );

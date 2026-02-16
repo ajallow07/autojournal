@@ -109,9 +109,11 @@ export async function setupAuth(app: Express) {
   );
 
   if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
-    const callbackURL = process.env.REPL_SLUG
-      ? `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co/api/auth/google/callback`
-      : "/api/auth/google/callback";
+    const callbackURL = process.env.APP_DOMAIN
+      ? `https://${process.env.APP_DOMAIN}/api/auth/google/callback`
+      : process.env.REPLIT_DEV_DOMAIN
+        ? `https://${process.env.REPLIT_DEV_DOMAIN}/api/auth/google/callback`
+        : "/api/auth/google/callback";
 
     passport.use(
       new GoogleStrategy(

@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Route, Briefcase, Home, Gauge, Calendar, TrendingUp } from "lucide-react";
+import { Briefcase, Home, Gauge, Calendar, Route } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import type { Trip, Vehicle } from "@shared/schema";
@@ -82,19 +82,11 @@ export default function Dashboard() {
 
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="space-y-1">
-          <h1 className="text-xl font-semibold tracking-tight">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">
-            {format(now, "MMMM yyyy")} overview {vehicle ? `- ${vehicle.name}` : ""}
-          </p>
-        </div>
-        <Link href="/trips/new">
-          <Button data-testid="button-add-trip-dashboard">
-            <Route className="w-4 h-4 mr-2" />
-            Log Trip
-          </Button>
-        </Link>
+      <div className="space-y-1">
+        <h1 className="text-xl font-semibold tracking-tight">Dashboard</h1>
+        <p className="text-sm text-muted-foreground">
+          {format(now, "MMMM yyyy")} overview {vehicle ? `- ${vehicle.name}` : ""}
+        </p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -170,12 +162,7 @@ export default function Dashboard() {
             <div className="flex flex-col items-center justify-center py-12 text-center px-4">
               <Route className="w-10 h-10 text-muted-foreground/50 mb-3" />
               <p className="text-sm font-medium text-muted-foreground">No trips logged yet</p>
-              <p className="text-xs text-muted-foreground mt-1">Start by adding your first trip</p>
-              <Link href="/trips/new">
-                <Button variant="outline" size="sm" className="mt-4" data-testid="button-add-first-trip">
-                  Add Trip
-                </Button>
-              </Link>
+              <p className="text-xs text-muted-foreground mt-1">Trips will appear here automatically when you drive</p>
             </div>
           ) : (
             <div className="divide-y">

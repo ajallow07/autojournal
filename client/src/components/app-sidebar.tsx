@@ -21,7 +21,7 @@ const navItems = [
   { title: "Trip Log", url: "/trips", icon: Route },
   { title: "Add Trip", url: "/trips/new", icon: Plus },
   { title: "Reports", url: "/reports", icon: BarChart3 },
-  { title: "Vehicle", url: "/vehicle", icon: Car },
+  { title: "Vehicles", url: "/vehicle", icon: Car },
   { title: "Tesla", url: "/tesla", icon: Zap },
   { title: "User Profile", url: "/profile", icon: User },
 ];

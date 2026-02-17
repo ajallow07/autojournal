@@ -1,4 +1,4 @@
-import { eq, desc, asc, and } from "drizzle-orm";
+import { eq, desc, asc, and, count } from "drizzle-orm";
 import { db } from "./db";
 import {
   vehicles, trips, teslaConnections, geofences,
@@ -13,6 +13,8 @@ export interface IStorage {
   getVehicle(id: string): Promise<Vehicle | undefined>;
   createVehicle(vehicle: InsertVehicle): Promise<Vehicle>;
   updateVehicle(id: string, vehicle: Partial<InsertVehicle>): Promise<Vehicle | undefined>;
+  deleteVehicle(id: string): Promise<boolean>;
+  getTripsCountByVehicle(vehicleId: string): Promise<number>;
 
   getTrips(userId: string): Promise<Trip[]>;
   getTrip(id: string): Promise<Trip | undefined>;
@@ -52,6 +54,16 @@ export class DatabaseStorage implements IStorage {
   async updateVehicle(id: string, data: Partial<InsertVehicle>): Promise<Vehicle | undefined> {
     const [updated] = await db.update(vehicles).set(data).where(eq(vehicles.id, id)).returning();
     return updated;
+  }
+
+  async deleteVehicle(id: string): Promise<boolean> {
+    const [deleted] = await db.delete(vehicles).where(eq(vehicles.id, id)).returning();
+    return !!deleted;
+  }
+
+  async getTripsCountByVehicle(vehicleId: string): Promise<number> {
+    const [result] = await db.select({ count: count() }).from(trips).where(eq(trips.vehicleId, vehicleId));
+    return result?.count || 0;
   }
 
   async getTrips(userId: string): Promise<Trip[]> {

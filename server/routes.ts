@@ -63,6 +63,24 @@ export async function registerRoutes(
     res.json(updated);
   });
 
+  app.delete("/api/vehicles/:id", isAuthenticated, async (req, res) => {
+    const vehicle = await storage.getVehicle(req.params.id);
+    if (!vehicle || vehicle.userId !== getUserId(req)) return res.status(404).json({ message: "Vehicle not found" });
+    const tripCount = await storage.getTripsCountByVehicle(req.params.id);
+    if (tripCount > 0) {
+      return res.status(409).json({
+        message: `Cannot delete vehicle with ${tripCount} existing trip${tripCount > 1 ? "s" : ""}. Remove all trips for this vehicle first.`,
+        tripCount,
+      });
+    }
+    const connection = await storage.getTeslaConnection(getUserId(req));
+    if (connection?.vehicleId === req.params.id) {
+      await storage.updateTeslaConnection(connection.id, { vehicleId: null });
+    }
+    await storage.deleteVehicle(req.params.id);
+    res.json({ success: true });
+  });
+
   app.get("/api/trips", isAuthenticated, async (req, res) => {
     const userId = getUserId(req);
     const tripsList = await storage.getTrips(userId);
@@ -174,7 +192,32 @@ export async function registerRoutes(
 
       const teslaVehicle = teslaVehicles[0];
       const userVehicles = await storage.getVehicles(userId);
-      const defaultVehicle = userVehicles.find((v) => v.isDefault) || userVehicles[0];
+      let linkedVehicle = userVehicles.find((v) => v.isDefault) || userVehicles[0];
+
+      if (!linkedVehicle) {
+        const displayName = teslaVehicle.display_name || "Tesla";
+        const vinStr = teslaVehicle.vin || "";
+        let make = "Tesla";
+        let model = "Vehicle";
+        if (vinStr.length >= 4) {
+          const modelChar = vinStr[3];
+          if (modelChar === "Y" || modelChar === "E") model = "Model Y";
+          else if (modelChar === "S" || modelChar === "A") model = "Model S";
+          else if (modelChar === "X" || modelChar === "B") model = "Model X";
+          else if (modelChar === "3" || modelChar === "W") model = "Model 3";
+        }
+        const currentYear = new Date().getFullYear();
+        linkedVehicle = await storage.createVehicle({
+          userId,
+          name: displayName,
+          make,
+          model,
+          year: currentYear,
+          licensePlate: "",
+          currentOdometer: 0,
+          isDefault: true,
+        });
+      }
 
       const existing = await storage.getTeslaConnection(userId);
       if (existing) {
@@ -186,7 +229,7 @@ export async function registerRoutes(
           vin: teslaVehicle.vin,
           vehicleName: teslaVehicle.display_name || `Tesla ${teslaVehicle.vin}`,
           isActive: true,
-          vehicleId: defaultVehicle?.id || null,
+          vehicleId: linkedVehicle.id,
         });
       } else {
         await storage.createTeslaConnection({
@@ -198,7 +241,7 @@ export async function registerRoutes(
           vin: teslaVehicle.vin,
           vehicleName: teslaVehicle.display_name || `Tesla ${teslaVehicle.vin}`,
           isActive: true,
-          vehicleId: defaultVehicle?.id || null,
+          vehicleId: linkedVehicle.id,
         });
       }
 

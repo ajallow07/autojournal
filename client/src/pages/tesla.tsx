@@ -322,11 +322,12 @@ function TeslaConnectionCard() {
           </Button>
         </div>
 
-        {conn.lastPolledAt && (
-          <p className="text-xs text-muted-foreground">
-            Last polled: {new Date(conn.lastPolledAt).toLocaleString("sv-SE")}
-          </p>
-        )}
+        <div className="text-xs text-muted-foreground space-y-0.5">
+          {conn.lastPolledAt && (
+            <p>Last polled: {new Date(conn.lastPolledAt).toLocaleString("sv-SE")}</p>
+          )}
+          <p>Auto-polling every 30 seconds. Trips are logged automatically based on drive state and geofences.</p>
+        </div>
       </CardContent>
     </Card>
   );

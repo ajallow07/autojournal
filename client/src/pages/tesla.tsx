@@ -261,15 +261,18 @@ function TeslaConnectionCard() {
             <p className="text-sm font-mono" data-testid="text-tesla-vin">{conn.vin}</p>
           </div>
           <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">Drive State</p>
+            <p className="text-xs text-muted-foreground">Vehicle State</p>
             <p className="text-sm font-medium capitalize" data-testid="text-drive-state">
-              {conn.lastDriveState === "asleep" ? "Sleeping" : conn.lastDriveState || "Unknown"}
+              {conn.lastDriveState === "asleep" ? "Sleeping (polling every 2 min)" :
+               conn.lastDriveState === "driving" ? "Driving (polling every 15s)" :
+               conn.lastDriveState === "parked" ? "Parked (polling every 30s)" :
+               conn.lastDriveState || "Unknown"}
             </p>
           </div>
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">Odometer</p>
             <p className="text-sm font-medium" data-testid="text-tesla-odometer">
-              {conn.lastOdometer ? `${conn.lastOdometer.toLocaleString("sv-SE", { maximumFractionDigits: 0 })} km` : "GPS-based tracking"}
+              {conn.lastOdometer ? `${conn.lastOdometer.toLocaleString("sv-SE", { maximumFractionDigits: 0 })} km` : "Waiting for vehicle data"}
             </p>
           </div>
           {conn.tripInProgress && (
@@ -336,7 +339,7 @@ function TeslaConnectionCard() {
           {conn.lastPolledAt && (
             <p>Last polled: {new Date(conn.lastPolledAt).toLocaleString("sv-SE")}</p>
           )}
-          <p>Auto-polling every 30 seconds. Trips are logged automatically based on drive state and geofences. Distance is calculated via GPS when odometer data is unavailable.</p>
+          <p>Adaptive polling: every 15s while driving, 30s when parked, 2 min when sleeping. Trips are logged automatically based on drive state and geofences.</p>
         </div>
       </CardContent>
     </Card>

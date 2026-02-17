@@ -253,7 +253,12 @@ async function reverseGeocode(lat: number, lon: number): Promise<string> {
   }
 }
 
-let pollingInterval: ReturnType<typeof setInterval> | null = null;
+let pollingTimeout: ReturnType<typeof setTimeout> | null = null;
+let isPollingActive = false;
+
+const POLL_INTERVAL_ASLEEP = 120000;
+const POLL_INTERVAL_PARKED = 30000;
+const POLL_INTERVAL_DRIVING = 15000;
 
 async function pollSingleConnection(connection: TeslaConnection): Promise<{
   status: string;
@@ -266,7 +271,8 @@ async function pollSingleConnection(connection: TeslaConnection): Promise<{
     const token = await getValidToken(connection);
 
     const vehicleOnlineState = await getVehicleState(token, connection.teslaVehicleId);
-    console.log(`[Tesla Poll] user=${connection.userId} vehicleState=${vehicleOnlineState} tripInProgress=${connection.tripInProgress}`);
+    const prevDriveState = connection.lastDriveState;
+    console.log(`[Tesla Poll] user=${connection.userId} vehicleState=${vehicleOnlineState} prevDriveState=${prevDriveState} tripInProgress=${connection.tripInProgress}`);
 
     if (vehicleOnlineState !== "online") {
       if (connection.tripInProgress) {
@@ -280,6 +286,10 @@ async function pollSingleConnection(connection: TeslaConnection): Promise<{
         await storage.updateTeslaConnection(connection.id, { lastPolledAt: new Date(), lastDriveState: "asleep" });
         return { status: "asleep", driveState: "asleep" };
       }
+    }
+
+    if (prevDriveState === "asleep" && vehicleOnlineState === "online") {
+      console.log(`[Tesla Poll] Vehicle woke up (asleep->online) for user=${connection.userId} - fetching fresh data`);
     }
 
     const vehicleData = await getVehicleData(token, connection.teslaVehicleId);
@@ -298,8 +308,7 @@ async function pollSingleConnection(connection: TeslaConnection): Promise<{
     const rawOdometer = vehicleState?.odometer;
     const odometer = rawOdometer != null && rawOdometer > 0 ? rawOdometer * 1.60934 : null;
 
-    const vsKeys = vehicleState ? Object.keys(vehicleState).join(",") : "no_vehicle_state";
-    console.log(`[Tesla Poll] user=${connection.userId} shift=${shiftState} lat=${lat} lon=${lon} odo_raw=${rawOdometer} odo_km=${odometer} vs_keys=${vsKeys}`);
+    console.log(`[Tesla Poll] user=${connection.userId} shift=${shiftState} lat=${lat} lon=${lon} odo_raw=${rawOdometer} odo_km=${odometer?.toFixed(1)}`);
 
     const isDriving = shiftState && shiftState !== "P";
     const currentDriveState = isDriving ? "driving" : "parked";
@@ -321,7 +330,7 @@ async function pollSingleConnection(connection: TeslaConnection): Promise<{
       updateData.tripStartLongitude = lon;
       updateData.tripStartLocation = locationName;
 
-      console.log(`[Tesla Trip] STARTED for user=${connection.userId} at ${locationName} odo=${odometer} lat=${lat} lon=${lon}`);
+      console.log(`[Tesla Trip] STARTED for user=${connection.userId} at ${locationName} odo=${odometer?.toFixed(1)} lat=${lat} lon=${lon}`);
       await storage.updateTeslaConnection(connection.id, updateData);
       return { status: "trip_started", driveState: currentDriveState, tripAction: "started" };
     }
@@ -424,7 +433,8 @@ async function pollSingleConnection(connection: TeslaConnection): Promise<{
     }
 
     await storage.updateTeslaConnection(connection.id, updateData);
-    return { status: "ok", driveState: currentDriveState };
+    const wokeUp = prevDriveState === "asleep" && vehicleOnlineState === "online";
+    return { status: wokeUp ? "woke_up" : "ok", driveState: currentDriveState };
   } catch (error: any) {
     console.error(`Tesla polling error for user ${connection.userId}:`, error.message);
     return { status: "error" };
@@ -441,33 +451,64 @@ export async function pollVehicleStateForUser(userId: string): Promise<{
   return pollSingleConnection(connection);
 }
 
-async function pollAllConnections() {
+function getNextPollInterval(results: Array<{ status: string; driveState?: string } | null>): number {
+  const hasDriving = results.some((r) => r?.driveState === "driving");
+  const hasTripPending = results.some((r) => r?.status === "asleep_trip_pending");
+  const hasParked = results.some((r) => r?.driveState === "parked");
+  const hasWokeUp = results.some((r) => r?.status === "woke_up");
+
+  if (hasDriving || hasTripPending || hasWokeUp) return POLL_INTERVAL_DRIVING;
+  if (hasParked) return POLL_INTERVAL_PARKED;
+  return POLL_INTERVAL_ASLEEP;
+}
+
+async function pollAllConnections(): Promise<number> {
   const connections = await storage.getAllActiveTeslaConnections();
+  if (connections.length === 0) {
+    console.log("[Tesla Poll] No active connections - stopping polling");
+    stopPolling();
+    return POLL_INTERVAL_ASLEEP;
+  }
+  const results: Array<{ status: string; driveState?: string } | null> = [];
   for (const conn of connections) {
     try {
-      await pollSingleConnection(conn);
+      const result = await pollSingleConnection(conn);
+      results.push(result);
     } catch (err: any) {
       console.error(`Polling error for connection ${conn.id}:`, err.message);
+      results.push(null);
+    }
+  }
+  return getNextPollInterval(results);
+}
+
+async function pollLoop() {
+  if (!isPollingActive) return;
+  try {
+    const nextInterval = await pollAllConnections();
+    if (isPollingActive) {
+      pollingTimeout = setTimeout(pollLoop, nextInterval);
+    }
+  } catch (err: any) {
+    console.error("Polling error:", err.message);
+    if (isPollingActive) {
+      pollingTimeout = setTimeout(pollLoop, POLL_INTERVAL_ASLEEP);
     }
   }
 }
 
-export function startPolling(intervalMs: number = 30000) {
+export function startPolling() {
   stopPolling();
-  console.log(`Starting Tesla polling every ${intervalMs / 1000}s`);
-  pollingInterval = setInterval(async () => {
-    try {
-      await pollAllConnections();
-    } catch (err: any) {
-      console.error("Polling error:", err.message);
-    }
-  }, intervalMs);
+  isPollingActive = true;
+  console.log(`Starting Tesla adaptive polling (driving=${POLL_INTERVAL_DRIVING / 1000}s, parked=${POLL_INTERVAL_PARKED / 1000}s, asleep=${POLL_INTERVAL_ASLEEP / 1000}s)`);
+  pollingTimeout = setTimeout(pollLoop, 5000);
 }
 
 export function stopPolling() {
-  if (pollingInterval) {
-    clearInterval(pollingInterval);
-    pollingInterval = null;
+  isPollingActive = false;
+  if (pollingTimeout) {
+    clearTimeout(pollingTimeout);
+    pollingTimeout = null;
     console.log("Stopped Tesla polling");
   }
 }

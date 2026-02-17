@@ -4,9 +4,11 @@
 A Swedish driver's journal (körjournal) application for logging and managing car trips for a Tesla Model Y based in Stockholm, Sweden. Supports multi-user authentication (Google OAuth, username/password), business/private trip classification, odometer tracking, comprehensive reports with CSV export, and Tesla API integration for automatic trip logging.
 
 ## Recent Changes
+- 2026-02-17: Implemented adaptive polling (15s driving, 30s parked, 2min asleep) to reduce API costs and battery drain
+- 2026-02-17: Added vehicle online/asleep state check before expensive API calls
+- 2026-02-17: Added wake-up with retry for completing trips when car sleeps
 - 2026-02-17: Fixed trip detection to use GPS haversine distance as fallback when Tesla API doesn't provide odometer data
 - 2026-02-17: Fixed stuck trip state - trips now complete even without odometer readings
-- 2026-02-17: Added debug logging for Tesla API polling to diagnose data issues
 - 2026-02-17: Vehicle odometer auto-updates after each trip; GPS-estimated trips noted in trip notes
 - 2026-02-17: Auto-create vehicle when Tesla connects (VIN parsing for model detection)
 - 2026-02-17: Multi-vehicle management with per-vehicle edit/delete; delete protection if trips exist (409)
@@ -81,10 +83,16 @@ shared/
 ## Tesla Integration
 - OAuth 2.0 flow with Tesla Fleet API (EU endpoint: fleet-api.prd.eu.vn.cloud.tesla.com)
 - Requires TESLA_CLIENT_ID and TESLA_CLIENT_SECRET secrets
-- Multi-user polling: polls all active Tesla connections every 30s
+- Adaptive polling: 15s while driving, 30s when parked, 2 min when asleep
+- Checks vehicle online state (free API) before expensive vehicle_data calls
+- Wake-up with retry (3 attempts) when trip needs completing and car sleeps
+- Handles 408 "vehicle unavailable" errors gracefully
+- Auto-stops polling when no active connections; restarts on new connection
+- Detects asleep→online transitions for priority data fetch
 - Reverse geocoding via OpenStreetMap Nominatim
 - Geofencing for automatic business/private classification per user
 - Trips marked with autoLogged=true when created by Tesla integration
+- GPS distance fallback when odometer unavailable; noted in trip notes
 
 ## Key Features
 - Multi-user authentication with username/password and Google login

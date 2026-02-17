@@ -13,6 +13,9 @@ export const vehicles = pgTable("vehicles", {
   model: text("model").notNull(),
   year: integer("year").notNull(),
   licensePlate: text("license_plate").notNull(),
+  vin: text("vin"),
+  color: text("color"),
+  fuelType: text("fuel_type"),
   currentOdometer: real("current_odometer").notNull().default(0),
   isDefault: boolean("is_default").notNull().default(false),
 });

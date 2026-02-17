@@ -95,8 +95,18 @@ shared/
 - Trips marked with autoLogged=true when created by Tesla integration
 - GPS distance fallback when odometer unavailable; noted in trip notes
 
+## Vehicle Registry Lookup (Biluppgifter API)
+- Endpoint: GET /api/vehicles/lookup/:regno
+- Uses Biluppgifter API (https://api.biluppgifter.se/api/v1/vehicle/regno/) for Swedish vehicle registry data
+- Requires BILUPPGIFTER_API_KEY secret
+- Returns: make, model, year, color, VIN, fuel type from Transportstyrelsen registry
+- Frontend: Add vehicle flow starts with reg number lookup, auto-fills all fields
+- Vehicle schema includes: vin, color, fuelType columns
+- Graceful fallback: manual entry available if API key not configured
+
 ## Key Features
 - Multi-user authentication with username/password and Google login
+- Vehicle lookup by registration number (Biluppgifter API / Transportstyrelsen data)
 - Manual and automatic trip logging with odometer, locations, time, and purpose
 - Business/private trip classification (manual or via geofences)
 - Monthly, custom period, and yearly overview reports

@@ -34,6 +34,80 @@ export async function registerRoutes(
   const patchTripSchema = insertTripSchema.partial();
   const patchGeofenceSchema = insertGeofenceSchema.partial();
 
+  app.get("/api/vehicles/lookup/:regno", isAuthenticated, async (req, res) => {
+    const regno = (req.params.regno as string).replace(/\s+/g, "").toUpperCase();
+    if (!regno || regno.length < 2 || regno.length > 10) {
+      return res.status(400).json({ message: "Invalid registration number" });
+    }
+
+    const apiKey = process.env.BILUPPGIFTER_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({ message: "Vehicle lookup service not configured. Add BILUPPGIFTER_API_KEY to enable." });
+    }
+
+    try {
+      const response = await fetch(`https://api.biluppgifter.se/api/v1/vehicle/regno/${encodeURIComponent(regno)}?include=basic,status,technical`, {
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "User-Agent": "MahlisAutoJournal/1.0",
+        },
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          return res.status(404).json({ message: "No vehicle found with that registration number" });
+        }
+        if (response.status === 401 || response.status === 403) {
+          return res.status(503).json({ message: "Vehicle lookup API key is invalid or expired" });
+        }
+        return res.status(502).json({ message: "Vehicle lookup service unavailable" });
+      }
+
+      const result = await response.json();
+      const data = result.data;
+      const basic = data?.basic?.data;
+      const status = data?.status?.data;
+      const technical = data?.technical?.data;
+      const attrs = data?.attributes;
+
+      let fuelType: string | null = null;
+      if (technical?.fuel) {
+        const fuelLower = String(technical.fuel).toLowerCase();
+        if (fuelLower.includes("el")) fuelType = "electric";
+        else if (fuelLower.includes("bensin")) fuelType = "petrol";
+        else if (fuelLower.includes("diesel")) fuelType = "diesel";
+        else if (fuelLower.includes("hybrid")) fuelType = "hybrid";
+        else fuelType = String(technical.fuel);
+      } else if (technical?.fuel_code) {
+        const code = String(technical.fuel_code);
+        if (code === "1") fuelType = "petrol";
+        else if (code === "2") fuelType = "diesel";
+        else if (code === "3") fuelType = "electric";
+        else if (code === "4") fuelType = "hybrid";
+      }
+
+      const vehicleInfo = {
+        regno: attrs?.regno || regno,
+        vin: attrs?.vin || null,
+        make: basic?.make || null,
+        model: basic?.model || null,
+        color: basic?.color || null,
+        year: basic?.vehicle_year || basic?.model_year || null,
+        fuelType,
+        firstRegistered: status?.first_registered || null,
+        numberOfOwners: status?.number_of_owners || null,
+      };
+
+      console.log(`[Vehicle Lookup] Found: ${vehicleInfo.make} ${vehicleInfo.model} (${vehicleInfo.year}) - ${vehicleInfo.regno}`);
+      res.json(vehicleInfo);
+    } catch (error: any) {
+      console.error(`[Vehicle Lookup] Error for ${regno}:`, error.message);
+      res.status(502).json({ message: "Failed to connect to vehicle lookup service" });
+    }
+  });
+
   app.get("/api/vehicles", isAuthenticated, async (req, res) => {
     const userId = getUserId(req);
     const vehiclesList = await storage.getVehicles(userId);

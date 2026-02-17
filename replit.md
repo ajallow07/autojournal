@@ -4,6 +4,13 @@
 A Swedish driver's journal (körjournal) application for logging and managing car trips for a Tesla Model Y based in Stockholm, Sweden. Supports multi-user authentication (Google OAuth, username/password), business/private trip classification, odometer tracking, comprehensive reports with CSV export, and Tesla API integration for automatic trip logging.
 
 ## Recent Changes
+- 2026-02-17: Fixed trip detection to use GPS haversine distance as fallback when Tesla API doesn't provide odometer data
+- 2026-02-17: Fixed stuck trip state - trips now complete even without odometer readings
+- 2026-02-17: Added debug logging for Tesla API polling to diagnose data issues
+- 2026-02-17: Vehicle odometer auto-updates after each trip; GPS-estimated trips noted in trip notes
+- 2026-02-17: Auto-create vehicle when Tesla connects (VIN parsing for model detection)
+- 2026-02-17: Multi-vehicle management with per-vehicle edit/delete; delete protection if trips exist (409)
+- 2026-02-17: Removed manual trip entry from Dashboard - trips auto-logged only via Tesla
 - 2026-02-16: Replaced Replit Auth with custom auth (username/password + Google OAuth via passport-local/passport-google-oauth20)
 - 2026-02-16: Added userId to all tables (vehicles, trips, tesla_connections, geofences) for multi-user data isolation
 - 2026-02-16: Added auth page with login/register form and Google OAuth button

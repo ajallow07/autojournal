@@ -228,7 +228,10 @@ async function pollSingleConnection(connection: TeslaConnection): Promise<{
     const shiftState = driveState?.shift_state;
     const lat = driveState?.latitude;
     const lon = driveState?.longitude;
-    const odometer = vehicleState?.odometer ? vehicleState.odometer * 1.60934 : null;
+    const rawOdometer = vehicleState?.odometer;
+    const odometer = rawOdometer != null && rawOdometer > 0 ? rawOdometer * 1.60934 : null;
+
+    console.log(`[Tesla Poll] user=${connection.userId} shift=${shiftState} lat=${lat} lon=${lon} odo_raw=${rawOdometer} odo_km=${odometer} tripInProgress=${connection.tripInProgress}`);
 
     const isDriving = shiftState && shiftState !== "P";
     const currentDriveState = isDriving ? "driving" : "parked";
@@ -250,14 +253,54 @@ async function pollSingleConnection(connection: TeslaConnection): Promise<{
       updateData.tripStartLongitude = lon;
       updateData.tripStartLocation = locationName;
 
+      console.log(`[Tesla Trip] STARTED for user=${connection.userId} at ${locationName} odo=${odometer} lat=${lat} lon=${lon}`);
       await storage.updateTeslaConnection(connection.id, updateData);
       return { status: "trip_started", driveState: currentDriveState, tripAction: "started" };
     }
 
-    if (!isDriving && connection.tripInProgress && connection.tripStartOdometer && odometer) {
-      const distance = odometer - connection.tripStartOdometer;
+    if (!isDriving && connection.tripInProgress) {
+      let distance: number | null = null;
+      let distanceSource = "unknown";
 
-      if (distance >= 0.1) {
+      if (connection.tripStartOdometer && odometer) {
+        distance = odometer - connection.tripStartOdometer;
+        distanceSource = "odometer";
+      }
+
+      if ((distance == null || distance <= 0) && lat && lon && connection.tripStartLatitude && connection.tripStartLongitude) {
+        const gpsDistM = haversineDistance(connection.tripStartLatitude, connection.tripStartLongitude, lat, lon);
+        distance = gpsDistM / 1000;
+        distanceSource = "gps";
+        console.log(`[Tesla Trip] Using GPS distance: ${distance.toFixed(2)} km (odometer not available)`);
+      }
+
+      const userVehicles = await storage.getVehicles(connection.userId);
+      const linkedVehicle = userVehicles.find((v) => v.id === connection.vehicleId) || userVehicles[0];
+
+      let startOdo: number;
+      let endOdo: number;
+      if (connection.tripStartOdometer && odometer) {
+        startOdo = connection.tripStartOdometer;
+        endOdo = odometer;
+      } else if (connection.tripStartOdometer && !odometer && distance != null) {
+        startOdo = connection.tripStartOdometer;
+        endOdo = connection.tripStartOdometer + distance;
+      } else if (!connection.tripStartOdometer && odometer && distance != null) {
+        startOdo = odometer - distance;
+        endOdo = odometer;
+      } else {
+        const baseOdo = linkedVehicle?.currentOdometer || 0;
+        startOdo = baseOdo;
+        endOdo = baseOdo + (distance || 0);
+      }
+
+      if (endOdo < startOdo) {
+        endOdo = startOdo + (distance || 0);
+      }
+
+      const MIN_DISTANCE_KM = 0.1;
+
+      if (distance != null && distance >= MIN_DISTANCE_KM) {
         const endLocationName = lat && lon ? await reverseGeocode(lat, lon) : "Unknown";
         const geofencesList = await storage.getGeofences(connection.userId);
 
@@ -272,8 +315,6 @@ async function pollSingleConnection(connection: TeslaConnection): Promise<{
           }
         }
 
-        const userVehicles = await storage.getVehicles(connection.userId);
-        const linkedVehicle = userVehicles.find((v) => v.id === connection.vehicleId) || userVehicles[0];
         if (linkedVehicle) {
           const now = new Date();
           const startTime = connection.tripStartTime || now;
@@ -285,13 +326,22 @@ async function pollSingleConnection(connection: TeslaConnection): Promise<{
             endTime: now.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" }),
             startLocation: connection.tripStartLocation || "Unknown",
             endLocation: endLocationName,
-            startOdometer: connection.tripStartOdometer,
-            endOdometer: odometer,
-            distance,
+            startOdometer: Math.round(startOdo * 10) / 10,
+            endOdometer: Math.round(endOdo * 10) / 10,
+            distance: Math.round(distance * 10) / 10,
             tripType,
             autoLogged: true,
+            notes: distanceSource === "gps" ? "Distance estimated via GPS" : undefined,
           });
+
+          if (endOdo > (linkedVehicle.currentOdometer || 0)) {
+            await storage.updateVehicle(linkedVehicle.id, { currentOdometer: Math.round(endOdo * 10) / 10 });
+          }
+
+          console.log(`[Tesla Trip] SAVED for user=${connection.userId}: ${connection.tripStartLocation} -> ${endLocationName}, ${distance.toFixed(1)} km (${distanceSource}), type=${tripType}, odo=${startOdo.toFixed(0)}->${endOdo.toFixed(0)}`);
         }
+      } else {
+        console.log(`[Tesla Trip] DISCARDED for user=${connection.userId}: distance=${distance?.toFixed(2) || 'unknown'} km (too short or no location data)`);
       }
 
       updateData.tripInProgress = false;

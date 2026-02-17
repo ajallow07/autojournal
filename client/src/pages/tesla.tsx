@@ -53,7 +53,11 @@ function TeslaConnectionCard() {
       lastPolledAt: string | null;
       lastDriveState: string | null;
       lastOdometer: number | null;
+      lastLatitude: number | null;
+      lastLongitude: number | null;
       tripInProgress: boolean;
+      tripStartLocation: string | null;
+      tripStartTime: string | null;
       vehicleId: string | null;
     } | null;
   }>({ queryKey: ["/api/tesla/status"] });
@@ -265,15 +269,21 @@ function TeslaConnectionCard() {
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">Odometer</p>
             <p className="text-sm font-medium" data-testid="text-tesla-odometer">
-              {conn.lastOdometer ? `${conn.lastOdometer.toLocaleString("sv-SE", { maximumFractionDigits: 0 })} km` : "N/A"}
+              {conn.lastOdometer ? `${conn.lastOdometer.toLocaleString("sv-SE", { maximumFractionDigits: 0 })} km` : "GPS-based tracking"}
             </p>
           </div>
           {conn.tripInProgress && (
-            <div className="col-span-full">
+            <div className="col-span-full space-y-1">
               <Badge variant="default" data-testid="badge-trip-in-progress">
                 <Navigation className="w-3 h-3 mr-1" />
                 Trip in progress
               </Badge>
+              {conn.tripStartLocation && (
+                <p className="text-xs text-muted-foreground">
+                  From: {conn.tripStartLocation}
+                  {conn.tripStartTime && ` (started ${new Date(conn.tripStartTime).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })})`}
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -326,7 +336,7 @@ function TeslaConnectionCard() {
           {conn.lastPolledAt && (
             <p>Last polled: {new Date(conn.lastPolledAt).toLocaleString("sv-SE")}</p>
           )}
-          <p>Auto-polling every 30 seconds. Trips are logged automatically based on drive state and geofences.</p>
+          <p>Auto-polling every 30 seconds. Trips are logged automatically based on drive state and geofences. Distance is calculated via GPS when odometer data is unavailable.</p>
         </div>
       </CardContent>
     </Card>

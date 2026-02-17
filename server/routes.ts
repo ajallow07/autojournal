@@ -143,7 +143,11 @@ export async function registerRoutes(
         lastPolledAt: connection.lastPolledAt,
         lastDriveState: connection.lastDriveState,
         lastOdometer: connection.lastOdometer,
+        lastLatitude: connection.lastLatitude,
+        lastLongitude: connection.lastLongitude,
         tripInProgress: connection.tripInProgress,
+        tripStartLocation: connection.tripStartLocation,
+        tripStartTime: connection.tripStartTime,
         vehicleId: connection.vehicleId,
       } : null,
     });

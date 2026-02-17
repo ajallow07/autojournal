@@ -16,6 +16,7 @@ import {
   SidebarHeader,
   SidebarFooter,
   SidebarSeparator,
+  useSidebar,
 } from "@/components/ui/sidebar";
 
 const navItems = [
@@ -64,6 +65,7 @@ function TeslaStatusIndicator() {
 export function AppSidebar() {
   const [location] = useLocation();
   const { user, logout } = useAuth();
+  const { setOpenMobile } = useSidebar();
 
   const displayName = user ? [user.firstName, user.lastName].filter(Boolean).join(" ") || user.username || "User" : "";
   const initials = user ? [user.firstName?.[0], user.lastName?.[0]].filter(Boolean).join("").toUpperCase() || (user.username?.[0]?.toUpperCase() || "U") : "";
@@ -97,7 +99,7 @@ export function AppSidebar() {
                       isActive={isActive}
                       data-testid={`nav-${item.title.toLowerCase().replace(/\s/g, "-")}`}
                     >
-                      <Link href={item.url}>
+                      <Link href={item.url} onClick={() => setOpenMobile(false)}>
                         <item.icon className="w-4 h-4" />
                         <span>{item.title}</span>
                       </Link>
@@ -121,7 +123,7 @@ export function AppSidebar() {
                       isActive={isActive}
                       data-testid={`nav-${item.title.toLowerCase().replace(/\s/g, "-")}`}
                     >
-                      <Link href={item.url}>
+                      <Link href={item.url} onClick={() => setOpenMobile(false)}>
                         <item.icon className="w-4 h-4" />
                         <span>{item.title}</span>
                       </Link>

@@ -231,7 +231,8 @@ async function pollSingleConnection(connection: TeslaConnection): Promise<{
     const rawOdometer = vehicleState?.odometer;
     const odometer = rawOdometer != null && rawOdometer > 0 ? rawOdometer * 1.60934 : null;
 
-    console.log(`[Tesla Poll] user=${connection.userId} shift=${shiftState} lat=${lat} lon=${lon} odo_raw=${rawOdometer} odo_km=${odometer} tripInProgress=${connection.tripInProgress}`);
+    const vsKeys = vehicleState ? Object.keys(vehicleState).join(",") : "no_vehicle_state";
+    console.log(`[Tesla Poll] user=${connection.userId} shift=${shiftState} lat=${lat} lon=${lon} odo_raw=${rawOdometer} odo_km=${odometer} tripInProgress=${connection.tripInProgress} vs_keys=${vsKeys}`);
 
     const isDriving = shiftState && shiftState !== "P";
     const currentDriveState = isDriving ? "driving" : "parked";

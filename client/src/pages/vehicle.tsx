@@ -92,6 +92,7 @@ function VehicleForm({ vehicle, onCancel }: { vehicle?: Vehicle; onCancel?: () =
       return;
     }
 
+    form.setValue("licensePlate", cleaned);
     setLookupLoading(true);
     try {
       const res = await apiRequest("GET", `/api/vehicles/lookup/${encodeURIComponent(cleaned)}`);
@@ -112,12 +113,18 @@ function VehicleForm({ vehicle, onCancel }: { vehicle?: Vehicle; onCancel?: () =
       toast({ title: "Vehicle found", description: `${data.make} ${data.model} (${data.year})` });
     } catch (error: any) {
       let msg = "Could not look up vehicle";
+      let notConfigured = false;
       try {
         const body = await error?.json?.();
         if (body?.message) msg = body.message;
+        if (body?.notConfigured) notConfigured = true;
       } catch {}
-      toast({ title: "Lookup failed", description: msg, variant: "destructive" });
       setLookupDone(true);
+      if (notConfigured) {
+        toast({ title: "Auto-lookup not available", description: "Fill in the vehicle details manually below." });
+      } else {
+        toast({ title: "Lookup failed", description: msg, variant: "destructive" });
+      }
     } finally {
       setLookupLoading(false);
     }
@@ -155,7 +162,7 @@ function VehicleForm({ vehicle, onCancel }: { vehicle?: Vehicle; onCancel?: () =
     return (
       <div className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          Enter a Swedish registration number to automatically fetch vehicle details from Transportstyrelsen.
+          Enter a Swedish registration number to get started. Vehicle details will be auto-filled if lookup is available.
         </p>
         <div className="flex items-center gap-2 flex-wrap">
           <Input

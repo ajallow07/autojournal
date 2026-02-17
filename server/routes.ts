@@ -42,7 +42,7 @@ export async function registerRoutes(
 
     const apiKey = process.env.BILUPPGIFTER_API_KEY;
     if (!apiKey) {
-      return res.status(503).json({ message: "Vehicle lookup service not configured. Add BILUPPGIFTER_API_KEY to enable." });
+      return res.status(503).json({ message: "Vehicle lookup is not configured. Ask your administrator to add a BILUPPGIFTER_API_KEY.", notConfigured: true });
     }
 
     try {

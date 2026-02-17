@@ -58,6 +58,8 @@ export const teslaConnections = pgTable("tesla_connections", {
   tripStartLatitude: real("trip_start_latitude"),
   tripStartLongitude: real("trip_start_longitude"),
   tripStartLocation: text("trip_start_location"),
+  lastShiftState: text("last_shift_state"),
+  parkedSince: timestamp("parked_since"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

@@ -41,10 +41,8 @@ export default function LandingPage() {
       <nav className="sticky top-0 z-50 border-b bg-background/80 backdrop-blur-sm">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-9 h-9 rounded-md bg-primary">
-              <Car className="w-5 h-5 text-primary-foreground" />
-            </div>
-            <span className="text-lg font-semibold">Körjournal</span>
+            <img src="/icon.png" alt="Mahlis Auto Journal" className="w-9 h-9 rounded-md" />
+            <span className="text-lg font-semibold">Mahlis Auto Journal</span>
           </div>
           <a href="/api/login">
             <Button data-testid="button-login-nav">Log in</Button>
@@ -97,7 +95,7 @@ export default function LandingPage() {
 
       <footer className="border-t py-6 px-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-4 flex-wrap text-xs text-muted-foreground">
-          <span>Körjournal — Stockholm, Sweden</span>
+          <span>Mahlis Auto Journal — Stockholm, Sweden</span>
           <span>Built for Tesla drivers</span>
         </div>
       </footer>

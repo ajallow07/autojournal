@@ -72,12 +72,9 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader className="p-4 pb-3">
         <Link href="/" className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-9 h-9 rounded-md bg-sidebar-primary">
-            <Car className="w-5 h-5 text-sidebar-primary-foreground" />
-          </div>
+          <img src="/icon.png" alt="Mahlis Auto Journal" className="w-9 h-9 rounded-md" />
           <div>
-            <h1 className="text-sm font-bold text-sidebar-foreground leading-tight tracking-tight">Körjournal</h1>
-            <p className="text-[10px] text-sidebar-foreground/40 uppercase tracking-wider">AutoJournal</p>
+            <h1 className="text-sm font-bold text-sidebar-foreground leading-tight tracking-tight">Mahlis Auto Journal</h1>
           </div>
         </Link>
       </SidebarHeader>

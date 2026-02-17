@@ -1,7 +1,7 @@
-# Körjournal - Tesla Model Y Driver's Journal
+# Mahlis Auto Journal - Smart Driver's Journal
 
 ## Overview
-A Swedish driver's journal (körjournal) application for logging and managing car trips for a Tesla Model Y based in Stockholm, Sweden. Supports multi-user authentication (Google OAuth, username/password), business/private trip classification, odometer tracking, comprehensive reports with CSV export, and Tesla API integration for automatic trip logging.
+Mahlis Auto Journal — a smart driver's journal application for logging and managing car trips for Tesla vehicles, based in Stockholm, Sweden. Supports multi-user authentication (Google OAuth, username/password), business/private trip classification, odometer tracking, comprehensive reports with CSV export, and Tesla API integration for automatic trip logging.
 
 ## Recent Changes
 - 2026-02-17: Implemented adaptive polling (15s driving, 30s parked, 2min asleep) to reduce API costs and battery drain

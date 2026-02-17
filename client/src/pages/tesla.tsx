@@ -263,7 +263,7 @@ function TeslaConnectionCard() {
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">Drive State</p>
             <p className="text-sm font-medium capitalize" data-testid="text-drive-state">
-              {conn.lastDriveState || "Unknown"}
+              {conn.lastDriveState === "asleep" ? "Sleeping" : conn.lastDriveState || "Unknown"}
             </p>
           </div>
           <div className="space-y-1">

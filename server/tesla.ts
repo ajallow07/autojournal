@@ -159,12 +159,55 @@ export async function listTeslaVehicles(token: string): Promise<any[]> {
   return data.response || [];
 }
 
-export async function getVehicleData(token: string, vehicleId: string): Promise<any> {
-  const data = await teslaApiGet(
-    token,
-    `/api/1/vehicles/${vehicleId}/vehicle_data?endpoints=location_data;vehicle_state;drive_state`
-  );
-  return data.response;
+export async function getVehicleState(token: string, vehicleId: string): Promise<string> {
+  const data = await teslaApiGet(token, "/api/1/vehicles");
+  const vehicles = data.response || [];
+  const vehicle = vehicles.find((v: any) => String(v.id) === String(vehicleId));
+  return vehicle?.state || "unknown";
+}
+
+async function wakeUpVehicle(token: string, vehicleId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${TESLA_API_BASE}/api/1/vehicles/${vehicleId}/wake_up`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      console.log(`[Tesla Wake] Failed to wake vehicle ${vehicleId}: ${res.status}`);
+      return false;
+    }
+    const data = await res.json();
+    const state = data.response?.state;
+    console.log(`[Tesla Wake] Vehicle ${vehicleId} state after wake: ${state}`);
+    if (state === "online") return true;
+
+    for (let i = 0; i < 3; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const checkState = await getVehicleState(token, vehicleId);
+      console.log(`[Tesla Wake] Retry ${i + 1}: state=${checkState}`);
+      if (checkState === "online") return true;
+    }
+    return false;
+  } catch (err: any) {
+    console.error(`[Tesla Wake] Error: ${err.message}`);
+    return false;
+  }
+}
+
+export async function getVehicleData(token: string, vehicleId: string): Promise<any | null> {
+  try {
+    const data = await teslaApiGet(
+      token,
+      `/api/1/vehicles/${vehicleId}/vehicle_data?endpoints=location_data;vehicle_state;drive_state`
+    );
+    return data.response;
+  } catch (err: any) {
+    if (err.message?.includes("408")) {
+      console.log(`[Tesla Data] Vehicle ${vehicleId} returned 408 (asleep/offline) - skipping`);
+      return null;
+    }
+    throw err;
+  }
 }
 
 function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -221,7 +264,31 @@ async function pollSingleConnection(connection: TeslaConnection): Promise<{
 
   try {
     const token = await getValidToken(connection);
+
+    const vehicleOnlineState = await getVehicleState(token, connection.teslaVehicleId);
+    console.log(`[Tesla Poll] user=${connection.userId} vehicleState=${vehicleOnlineState} tripInProgress=${connection.tripInProgress}`);
+
+    if (vehicleOnlineState !== "online") {
+      if (connection.tripInProgress) {
+        console.log(`[Tesla Poll] Vehicle asleep but trip in progress - attempting wake to complete trip`);
+        const woke = await wakeUpVehicle(token, connection.teslaVehicleId);
+        if (!woke) {
+          await storage.updateTeslaConnection(connection.id, { lastPolledAt: new Date() });
+          return { status: "asleep_trip_pending", driveState: "asleep" };
+        }
+      } else {
+        await storage.updateTeslaConnection(connection.id, { lastPolledAt: new Date(), lastDriveState: "asleep" });
+        return { status: "asleep", driveState: "asleep" };
+      }
+    }
+
     const vehicleData = await getVehicleData(token, connection.teslaVehicleId);
+    if (!vehicleData) {
+      console.log(`[Tesla Poll] No vehicle data returned (408/asleep) for user=${connection.userId}`);
+      await storage.updateTeslaConnection(connection.id, { lastPolledAt: new Date(), lastDriveState: "asleep" });
+      return { status: "asleep", driveState: "asleep" };
+    }
+
     const driveState = vehicleData.drive_state;
     const vehicleState = vehicleData.vehicle_state;
 
@@ -232,7 +299,7 @@ async function pollSingleConnection(connection: TeslaConnection): Promise<{
     const odometer = rawOdometer != null && rawOdometer > 0 ? rawOdometer * 1.60934 : null;
 
     const vsKeys = vehicleState ? Object.keys(vehicleState).join(",") : "no_vehicle_state";
-    console.log(`[Tesla Poll] user=${connection.userId} shift=${shiftState} lat=${lat} lon=${lon} odo_raw=${rawOdometer} odo_km=${odometer} tripInProgress=${connection.tripInProgress} vs_keys=${vsKeys}`);
+    console.log(`[Tesla Poll] user=${connection.userId} shift=${shiftState} lat=${lat} lon=${lon} odo_raw=${rawOdometer} odo_km=${odometer} vs_keys=${vsKeys}`);
 
     const isDriving = shiftState && shiftState !== "P";
     const currentDriveState = isDriving ? "driving" : "parked";

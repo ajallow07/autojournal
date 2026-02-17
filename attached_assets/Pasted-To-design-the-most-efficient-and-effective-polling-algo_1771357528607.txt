@@ -1,0 +1,61 @@
+To design the most efficient and effective polling algorithm for the Tesla Fleet API, we have to navigate a strict set of constraints. With the transition to the official Fleet API, Tesla introduced pay-per-use billing and aggressive rate limits (e.g., 60 requests/minute for realtime data). More importantly, polling incorrectly will keep the vehicle's computer awake, causing severe "vampire drain" on the battery and wearing out the high-voltage contactors.
+
+While Fleet Telemetry (WebSocket/PubSub streaming) is now Tesla’s strongly recommended and significantly cheaper method for trip logging, if your architecture strictly requires a polling mechanism, you must implement a Sleep-Aware State Machine.
+
+Here is the deep-dive algorithm designed to capture accurate trip data while strictly protecting the vehicle's sleep cycle and your API budget.
+
+The Core Rule: Separation of Endpoints
+Never blindly poll /vehicle_data. You must separate your requests into two tiers:
+
+The State Check: /api/1/vehicles/{id}. This returns a simple state (online, asleep, offline). It does not wake the vehicle or reset its sleep timer.
+
+The Payload Check: /api/1/vehicles/{id}/vehicle_data. This returns the GPS and drive metrics, but it resets the vehicle's sleep timer. Calling this too often guarantees the car will never sleep.
+
+The Sleep-Aware State Machine Algorithm
+Initialize a state variable vehicle_status and an idle_timer.
+
+State 1: Deep Sleep (asleep or offline)
+The vehicle is parked and its computer is off. It cannot drive without waking up first.
+
+Action: Poll the basic /vehicles/{id} endpoint.
+
+Frequency: Every 10 to 15 minutes.
+
+Transition: If the response returns state: "online", the car has woken up (e.g., a door opened, preconditioning started, or the driver got in). Transition immediately to State 2.
+
+State 2: Awake & Idle (online but parked)
+The Danger Zone. The car is awake, but you don't know if it's about to drive, actively charging, or just downloading a firmware update.
+
+Action: Poll /vehicle_data to check drive_state.shift_state.
+
+Frequency: Every 1 to 2 minutes.
+
+Logic:
+
+If shift_state is D (Drive), R (Reverse), or N (Neutral): Start a new trip log. Transition to State 3.
+
+If shift_state is P (Park) or null: The car is idle. Add the time elapsed to your idle_timer.
+
+The Sleep Allowance (Crucial): If your idle_timer exceeds 15 minutes, stop polling /vehicle_data completely. The car needs ~15 minutes of uninterrupted network silence to fall asleep. Revert to polling only /vehicles/{id} every 1 minute until the state officially returns to asleep (Transition back to State 1).
+
+State 3: Active Trip (driving)
+The vehicle is in motion. You need data resolution, but you must balance it against API costs and rate limits.
+
+Action: Poll /vehicle_data (or specifically request only location_data and drive_state if your library supports endpoint pruning to reduce payload weight).
+
+Frequency: Every 30 to 60 seconds. (Polling more frequently than 30 seconds will rapidly drain your API budget under the new Fleet API pricing).
+
+Logic:
+
+Log latitude, longitude, speed, odometer, and battery_level.
+
+If shift_state returns to P (Park): The driver has parked. Log the end of the trip, reset your idle_timer to 0, and transition back to State 2.
+
+Handling API Drops: If you receive a 408 Request Timeout or 429 Too Many Requests while in this state, do not close the trip. Vehicles frequently lose cellular connection in tunnels or rural areas. Maintain the "Active Trip" state for at least 5 to 10 minutes of failed pings before forcefully closing the trip log.
+
+Fallback Optimizations & Edge Cases
+Charging Awareness: If charge_state.charging_state is Charging, the car will not fall asleep anyway. You can safely poll /vehicle_data every 5-10 minutes to log the charging session without worrying about vampire drain, but you should still avoid high-frequency polling to save API costs.
+
+Token Expiration: The Fleet API uses standard JWTs. Ensure your algorithm checks token validity and refreshes it gracefully in the background before initiating a poll, so you don't miss the start of a trip due to a 401 Unauthorized error.
+
+Geofence Polling Decay: If the car transitions to Park at a known "Safe" location (like a Home geofence) where it rarely does short, immediate trips, you can confidently increase the Phase 2 polling interval to allow the car to sleep faster.

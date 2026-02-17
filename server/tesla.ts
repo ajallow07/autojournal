@@ -6,10 +6,15 @@ const TESLA_TOKEN_URL = "https://auth.tesla.com/oauth2/v3/token";
 const TESLA_API_BASE = "https://fleet-api.prd.eu.vn.cloud.tesla.com";
 const TESLA_AUDIENCE = "https://fleet-api.prd.eu.vn.cloud.tesla.com";
 
-const POLL_INTERVAL_IDLE = 120000;
-const POLL_INTERVAL_MONITORING = 60000;
-const POLL_INTERVAL_DRIVING = 60000;
+const POLL_DEEP_SLEEP_MS = 600000;
+const POLL_AWAKE_IDLE_MS = 90000;
+const POLL_ACTIVE_TRIP_MS = 30000;
+const POLL_PARKED_CONFIRMING_MS = 60000;
+const POLL_SLEEP_CHECK_MS = 60000;
+const SLEEP_ALLOWANCE_MS = 900000;
 const PARKED_CONFIRMATION_MS = 120000;
+const TRIP_ERROR_TIMEOUT_MS = 600000;
+const MIN_DISTANCE_KM = 0.1;
 
 function getClientId(): string {
   const id = process.env.TESLA_CLIENT_ID;
@@ -133,7 +138,8 @@ export async function refreshAccessToken(refreshToken: string): Promise<{
 async function getValidToken(connection: TeslaConnection): Promise<string> {
   if (!connection.accessToken) throw new Error("No access token");
 
-  if (connection.tokenExpiresAt && new Date(connection.tokenExpiresAt) < new Date()) {
+  const bufferMs = 60000;
+  if (connection.tokenExpiresAt && new Date(connection.tokenExpiresAt).getTime() - bufferMs < Date.now()) {
     if (!connection.refreshToken) throw new Error("No refresh token available");
 
     const tokens = await refreshAccessToken(connection.refreshToken);
@@ -152,11 +158,26 @@ async function teslaApiGet(token: string, path: string): Promise<any> {
   const res = await fetch(`${TESLA_API_BASE}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
+  if (res.status === 408) {
+    throw new TeslaApiError(408, "Vehicle unavailable (asleep/offline)");
+  }
+  if (res.status === 429) {
+    throw new TeslaApiError(429, "Rate limited");
+  }
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Tesla API error (${res.status}): ${err}`);
+    throw new TeslaApiError(res.status, `Tesla API error: ${err}`);
   }
   return res.json();
+}
+
+class TeslaApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+    this.name = "TeslaApiError";
+  }
 }
 
 export async function listTeslaVehicles(token: string): Promise<any[]> {
@@ -164,11 +185,19 @@ export async function listTeslaVehicles(token: string): Promise<any[]> {
   return data.response || [];
 }
 
-export async function getVehicleState(token: string, vehicleId: string): Promise<string> {
+async function getVehicleOnlineState(token: string, teslaVehicleId: string): Promise<string> {
   const data = await teslaApiGet(token, "/api/1/vehicles");
   const vehicles = data.response || [];
-  const vehicle = vehicles.find((v: any) => String(v.id) === String(vehicleId));
+  const vehicle = vehicles.find((v: any) => String(v.id) === String(teslaVehicleId));
   return vehicle?.state || "unknown";
+}
+
+async function getVehicleData(token: string, vehicleId: string): Promise<any> {
+  const data = await teslaApiGet(
+    token,
+    `/api/1/vehicles/${vehicleId}/vehicle_data?endpoints=location_data;vehicle_state;drive_state;charge_state`
+  );
+  return data.response;
 }
 
 async function wakeUpVehicle(token: string, vehicleId: string): Promise<boolean> {
@@ -188,7 +217,7 @@ async function wakeUpVehicle(token: string, vehicleId: string): Promise<boolean>
 
     for (let i = 0; i < 3; i++) {
       await new Promise((r) => setTimeout(r, 3000));
-      const checkState = await getVehicleState(token, vehicleId);
+      const checkState = await getVehicleOnlineState(token, vehicleId);
       console.log(`[Tesla Wake] Retry ${i + 1}: state=${checkState}`);
       if (checkState === "online") return true;
     }
@@ -196,22 +225,6 @@ async function wakeUpVehicle(token: string, vehicleId: string): Promise<boolean>
   } catch (err: any) {
     console.error(`[Tesla Wake] Error: ${err.message}`);
     return false;
-  }
-}
-
-export async function getVehicleData(token: string, vehicleId: string): Promise<any | null> {
-  try {
-    const data = await teslaApiGet(
-      token,
-      `/api/1/vehicles/${vehicleId}/vehicle_data?endpoints=location_data;vehicle_state;drive_state`
-    );
-    return data.response;
-  } catch (err: any) {
-    if (err.message?.includes("408")) {
-      console.log(`[Tesla Data] Vehicle ${vehicleId} returned 408 (asleep/offline) - skipping`);
-      return null;
-    }
-    throw err;
   }
 }
 
@@ -258,200 +271,48 @@ async function reverseGeocode(lat: number, lon: number): Promise<string> {
   }
 }
 
-let pollingTimeout: ReturnType<typeof setTimeout> | null = null;
-let isPollingActive = false;
-
-async function pollSingleConnection(connection: TeslaConnection): Promise<{
+interface PollResult {
   status: string;
   driveState?: string;
   tripAction?: string;
-} | null> {
+  pollState?: string;
+}
+
+async function pollSingleConnection(connection: TeslaConnection): Promise<PollResult | null> {
   if (!connection.isActive || !connection.teslaVehicleId) return null;
+
+  const currentPollState = connection.pollState || "deep_sleep";
 
   try {
     const token = await getValidToken(connection);
-    const prevShiftState = connection.lastShiftState;
-    const prevDriveState = connection.lastDriveState;
 
-    const vehicleOnlineState = await getVehicleState(token, connection.teslaVehicleId);
-    console.log(`[Tesla Poll] user=${connection.userId} onlineState=${vehicleOnlineState} prevShift=${prevShiftState} prevDrive=${prevDriveState} tripInProgress=${connection.tripInProgress}`);
+    if (currentPollState === "deep_sleep") {
+      return await pollDeepSleep(connection, token);
+    } else if (currentPollState === "awake_idle") {
+      return await pollAwakeIdle(connection, token);
+    } else if (currentPollState === "active_trip") {
+      return await pollActiveTrip(connection, token);
+    } else if (currentPollState === "sleep_pending") {
+      return await pollSleepPending(connection, token);
+    }
 
-    if (vehicleOnlineState !== "online") {
-      if (connection.tripInProgress) {
-        console.log(`[Tesla Poll] Vehicle asleep but trip in progress - attempting wake to complete trip`);
-        const woke = await wakeUpVehicle(token, connection.teslaVehicleId);
-        if (!woke) {
-          await storage.updateTeslaConnection(connection.id, { lastPolledAt: new Date() });
-          return { status: "asleep_trip_pending", driveState: "asleep" };
-        }
-      } else {
+    return await pollDeepSleep(connection, token);
+  } catch (error: any) {
+    const isRetryable = error instanceof TeslaApiError && (error.status === 408 || error.status === 429);
+
+    if (isRetryable && connection.tripInProgress) {
+      const errors = (connection.consecutiveErrors || 0) + 1;
+      const firstErrorAt = connection.lastApiErrorAt || new Date();
+      const errorDuration = Date.now() - new Date(firstErrorAt).getTime();
+
+      console.log(`[Tesla Poll] Retryable error (${error.status}) during active trip for user=${connection.userId}, errors=${errors}, duration=${Math.round(errorDuration / 1000)}s`);
+
+      if (errorDuration > TRIP_ERROR_TIMEOUT_MS) {
+        console.log(`[Tesla Poll] Trip error timeout reached (${Math.round(errorDuration / 1000)}s) - force-closing trip for user=${connection.userId}`);
+        await completeTrip(connection, connection.lastLatitude ?? undefined, connection.lastLongitude ?? undefined, connection.lastOdometer);
         await storage.updateTeslaConnection(connection.id, {
           lastPolledAt: new Date(),
-          lastDriveState: "asleep",
-          lastShiftState: null,
-          parkedSince: null,
-        });
-        return { status: "asleep", driveState: "asleep" };
-      }
-    }
-
-    const vehicleData = await getVehicleData(token, connection.teslaVehicleId);
-    if (!vehicleData) {
-      console.log(`[Tesla Poll] No vehicle data returned (408/asleep) for user=${connection.userId}`);
-      await storage.updateTeslaConnection(connection.id, {
-        lastPolledAt: new Date(),
-        lastDriveState: "asleep",
-        lastShiftState: null,
-      });
-      return { status: "asleep", driveState: "asleep" };
-    }
-
-    const driveState = vehicleData.drive_state;
-    const vehicleState = vehicleData.vehicle_state;
-    const shiftState = driveState?.shift_state;
-    const lat = driveState?.latitude;
-    const lon = driveState?.longitude;
-    const rawOdometer = vehicleState?.odometer;
-    const odometer = rawOdometer != null && rawOdometer > 0 ? rawOdometer * 1.60934 : null;
-
-    const isDriving = shiftState === "D" || shiftState === "R" || shiftState === "N";
-    const isExplicitlyParked = shiftState === "P";
-    const currentDriveState = isDriving ? "driving" : "parked";
-    const wasParkedOrAsleep = !prevShiftState || prevShiftState === "P" || prevDriveState === "asleep";
-
-    console.log(`[Tesla Poll] user=${connection.userId} shift=${shiftState || "null"} prevShift=${prevShiftState || "null"} lat=${lat} lon=${lon} odo_km=${odometer?.toFixed(1)} isDriving=${isDriving}`);
-
-    if (isDriving && !connection.tripInProgress && wasParkedOrAsleep) {
-      const locationName = lat && lon ? await reverseGeocode(lat, lon) : "Unknown";
-      await storage.updateTeslaConnection(connection.id, {
-        lastPolledAt: new Date(),
-        lastDriveState: "driving",
-        lastShiftState: shiftState,
-        lastLatitude: lat,
-        lastLongitude: lon,
-        lastOdometer: odometer,
-        tripInProgress: true,
-        tripStartTime: new Date(),
-        tripStartOdometer: odometer,
-        tripStartLatitude: lat,
-        tripStartLongitude: lon,
-        tripStartLocation: locationName,
-        parkedSince: null,
-      });
-
-      console.log(`[Tesla Trip] STARTED (P→${shiftState}) for user=${connection.userId} at ${locationName} odo=${odometer?.toFixed(1)}`);
-      return { status: "trip_started", driveState: "driving", tripAction: "started" };
-    }
-
-    if (isDriving && !connection.tripInProgress && !wasParkedOrAsleep) {
-      console.log(`[Tesla Poll] Vehicle already in ${shiftState} without P→D transition, tracking shift state only`);
-      await storage.updateTeslaConnection(connection.id, {
-        lastPolledAt: new Date(),
-        lastDriveState: "driving",
-        lastShiftState: shiftState,
-        lastLatitude: lat,
-        lastLongitude: lon,
-        lastOdometer: odometer,
-      });
-      return { status: "driving_no_trip", driveState: "driving" };
-    }
-
-    if (isDriving && connection.tripInProgress) {
-      await storage.updateTeslaConnection(connection.id, {
-        lastPolledAt: new Date(),
-        lastDriveState: "driving",
-        lastShiftState: shiftState,
-        lastLatitude: lat,
-        lastLongitude: lon,
-        lastOdometer: odometer,
-        parkedSince: null,
-      });
-
-      console.log(`[Tesla Trip] DRIVING for user=${connection.userId} lat=${lat} lon=${lon} odo=${odometer?.toFixed(1)}`);
-      return { status: "driving", driveState: "driving" };
-    }
-
-    if (isExplicitlyParked && connection.tripInProgress) {
-      const now = new Date();
-
-      if (!connection.parkedSince) {
-        console.log(`[Tesla Trip] Car returned to Park for user=${connection.userId} - starting ${PARKED_CONFIRMATION_MS / 1000}s confirmation timer`);
-        await storage.updateTeslaConnection(connection.id, {
-          lastPolledAt: now,
-          lastDriveState: "parked",
-          lastShiftState: shiftState || "P",
-          lastLatitude: lat,
-          lastLongitude: lon,
-          lastOdometer: odometer,
-          parkedSince: now,
-        });
-        return { status: "parked_confirming", driveState: "parked" };
-      }
-
-      const parkedDuration = now.getTime() - new Date(connection.parkedSince).getTime();
-
-      if (parkedDuration < PARKED_CONFIRMATION_MS) {
-        console.log(`[Tesla Trip] Still confirming park for user=${connection.userId} (${Math.round(parkedDuration / 1000)}s / ${PARKED_CONFIRMATION_MS / 1000}s)`);
-        await storage.updateTeslaConnection(connection.id, {
-          lastPolledAt: now,
-          lastDriveState: "parked",
-          lastShiftState: shiftState || "P",
-          lastLatitude: lat,
-          lastLongitude: lon,
-          lastOdometer: odometer,
-        });
-        return { status: "parked_confirming", driveState: "parked" };
-      }
-
-      console.log(`[Tesla Trip] Parked for ${Math.round(parkedDuration / 1000)}s - completing trip for user=${connection.userId}`);
-      await completeTrip(connection, lat, lon, odometer);
-
-      await storage.updateTeslaConnection(connection.id, {
-        lastPolledAt: now,
-        lastDriveState: "parked",
-        lastShiftState: shiftState || "P",
-        lastLatitude: lat,
-        lastLongitude: lon,
-        lastOdometer: odometer,
-        tripInProgress: false,
-        tripStartTime: null,
-        tripStartOdometer: null,
-        tripStartLatitude: null,
-        tripStartLongitude: null,
-        tripStartLocation: null,
-        parkedSince: null,
-      });
-
-      return { status: "trip_ended", driveState: "parked", tripAction: "ended" };
-    }
-
-    if (!shiftState && connection.tripInProgress) {
-      console.log(`[Tesla Poll] Null shift_state with trip in progress for user=${connection.userId} - treating as parked for confirmation`);
-      const now = new Date();
-      if (!connection.parkedSince) {
-        await storage.updateTeslaConnection(connection.id, {
-          lastPolledAt: now,
-          lastDriveState: "parked",
-          lastShiftState: null,
-          lastLatitude: lat,
-          lastLongitude: lon,
-          lastOdometer: odometer,
-          parkedSince: now,
-        });
-        return { status: "parked_confirming", driveState: "parked" };
-      }
-
-      const parkedDuration = now.getTime() - new Date(connection.parkedSince).getTime();
-      if (parkedDuration >= PARKED_CONFIRMATION_MS) {
-        console.log(`[Tesla Trip] Null shift_state + parked ${Math.round(parkedDuration / 1000)}s - completing trip for user=${connection.userId}`);
-        await completeTrip(connection, lat, lon, odometer);
-        await storage.updateTeslaConnection(connection.id, {
-          lastPolledAt: now,
-          lastDriveState: "parked",
-          lastShiftState: null,
-          lastLatitude: lat,
-          lastLongitude: lon,
-          lastOdometer: odometer,
+          pollState: "deep_sleep",
           tripInProgress: false,
           tripStartTime: null,
           tripStartOdometer: null,
@@ -459,36 +320,348 @@ async function pollSingleConnection(connection: TeslaConnection): Promise<{
           tripStartLongitude: null,
           tripStartLocation: null,
           parkedSince: null,
+          idleSince: null,
+          consecutiveErrors: 0,
+          lastApiErrorAt: null,
         });
-        return { status: "trip_ended", driveState: "parked", tripAction: "ended" };
+        return { status: "trip_force_ended", driveState: "unknown", tripAction: "ended", pollState: "deep_sleep" };
       }
 
       await storage.updateTeslaConnection(connection.id, {
-        lastPolledAt: now,
-        lastDriveState: "parked",
-        lastShiftState: null,
-        lastLatitude: lat,
-        lastLongitude: lon,
-        lastOdometer: odometer,
+        lastPolledAt: new Date(),
+        consecutiveErrors: errors,
+        lastApiErrorAt: firstErrorAt,
       });
-      return { status: "parked_confirming", driveState: "parked" };
+      return { status: "error_retrying", driveState: "driving", pollState: "active_trip" };
     }
 
+    console.error(`[Tesla Poll] Error for user ${connection.userId} (state=${currentPollState}):`, error.message);
     await storage.updateTeslaConnection(connection.id, {
       lastPolledAt: new Date(),
-      lastDriveState: currentDriveState,
+      consecutiveErrors: (connection.consecutiveErrors || 0) + 1,
+    });
+    return { status: "error", pollState: currentPollState };
+  }
+}
+
+async function pollDeepSleep(connection: TeslaConnection, token: string): Promise<PollResult> {
+  let onlineState: string;
+  try {
+    onlineState = await getVehicleOnlineState(token, connection.teslaVehicleId!);
+  } catch (err: any) {
+    if (err instanceof TeslaApiError && (err.status === 408 || err.status === 429)) {
+      console.log(`[Tesla Poll] DEEP_SLEEP: ${err.status} for user=${connection.userId} - staying in DEEP_SLEEP`);
+      await storage.updateTeslaConnection(connection.id, { lastPolledAt: new Date() });
+      return { status: "asleep", driveState: "asleep", pollState: "deep_sleep" };
+    }
+    throw err;
+  }
+  console.log(`[Tesla Poll] DEEP_SLEEP user=${connection.userId} vehicleState=${onlineState} tripInProgress=${connection.tripInProgress}`);
+
+  if (connection.tripInProgress && onlineState !== "online") {
+    console.log(`[Tesla Poll] Trip in progress but vehicle asleep for user=${connection.userId} - attempting wake to complete trip`);
+    const woke = await wakeUpVehicle(token, connection.teslaVehicleId!);
+    if (woke) {
+      console.log(`[Tesla Poll] Vehicle woken successfully - transitioning to ACTIVE_TRIP to complete`);
+      await storage.updateTeslaConnection(connection.id, {
+        lastPolledAt: new Date(),
+        pollState: "active_trip",
+        consecutiveErrors: 0,
+        lastApiErrorAt: null,
+      });
+      return { status: "woke_for_trip", driveState: "online", pollState: "active_trip" };
+    }
+    console.log(`[Tesla Poll] Could not wake vehicle - will retry next poll`);
+    await storage.updateTeslaConnection(connection.id, { lastPolledAt: new Date() });
+    return { status: "asleep_trip_pending", driveState: "asleep", pollState: "deep_sleep" };
+  }
+
+  if (onlineState === "online") {
+    const nextState = connection.tripInProgress ? "active_trip" : "awake_idle";
+    console.log(`[Tesla Poll] Vehicle woke up for user=${connection.userId} - transitioning to ${nextState.toUpperCase()}`);
+    await storage.updateTeslaConnection(connection.id, {
+      lastPolledAt: new Date(),
+      lastDriveState: "online",
+      pollState: nextState,
+      idleSince: connection.tripInProgress ? null : new Date(),
+      consecutiveErrors: 0,
+    });
+    return { status: "woke_up", driveState: "online", pollState: nextState };
+  }
+
+  await storage.updateTeslaConnection(connection.id, {
+    lastPolledAt: new Date(),
+    lastDriveState: "asleep",
+    lastShiftState: null,
+    consecutiveErrors: 0,
+  });
+  return { status: "asleep", driveState: "asleep", pollState: "deep_sleep" };
+}
+
+async function pollAwakeIdle(connection: TeslaConnection, token: string): Promise<PollResult> {
+  let vehicleData: any;
+  try {
+    vehicleData = await getVehicleData(token, connection.teslaVehicleId!);
+  } catch (err: any) {
+    if (err instanceof TeslaApiError && (err.status === 408 || err.status === 429)) {
+      console.log(`[Tesla Poll] AWAKE_IDLE: ${err.status} for user=${connection.userId} - transitioning to DEEP_SLEEP`);
+      await storage.updateTeslaConnection(connection.id, {
+        lastPolledAt: new Date(),
+        lastDriveState: "asleep",
+        lastShiftState: null,
+        pollState: "deep_sleep",
+        idleSince: null,
+        consecutiveErrors: 0,
+      });
+      return { status: "asleep", driveState: "asleep", pollState: "deep_sleep" };
+    }
+    throw err;
+  }
+  if (!vehicleData) {
+    console.log(`[Tesla Poll] AWAKE_IDLE: No vehicle data for user=${connection.userId} - back to DEEP_SLEEP`);
+    await storage.updateTeslaConnection(connection.id, {
+      lastPolledAt: new Date(),
+      lastDriveState: "asleep",
+      lastShiftState: null,
+      pollState: "deep_sleep",
+      idleSince: null,
+    });
+    return { status: "asleep", driveState: "asleep", pollState: "deep_sleep" };
+  }
+
+  const driveState = vehicleData.drive_state;
+  const vehicleState = vehicleData.vehicle_state;
+  const chargeState = vehicleData.charge_state;
+  const shiftState = driveState?.shift_state;
+  const lat = driveState?.latitude;
+  const lon = driveState?.longitude;
+  const rawOdometer = vehicleState?.odometer;
+  const odometer = rawOdometer != null && rawOdometer > 0 ? rawOdometer * 1.60934 : null;
+  const isCharging = chargeState?.charging_state === "Charging";
+
+  const isDriving = shiftState === "D" || shiftState === "R" || shiftState === "N";
+
+  console.log(`[Tesla Poll] AWAKE_IDLE user=${connection.userId} shift=${shiftState || "null"} charging=${isCharging} lat=${lat} lon=${lon}`);
+
+  if (isDriving) {
+    const locationName = lat && lon ? await reverseGeocode(lat, lon) : "Unknown";
+    await storage.updateTeslaConnection(connection.id, {
+      lastPolledAt: new Date(),
+      lastDriveState: "driving",
+      lastShiftState: shiftState,
+      lastLatitude: lat,
+      lastLongitude: lon,
+      lastOdometer: odometer,
+      pollState: "active_trip",
+      tripInProgress: true,
+      tripStartTime: new Date(),
+      tripStartOdometer: odometer,
+      tripStartLatitude: lat,
+      tripStartLongitude: lon,
+      tripStartLocation: locationName,
+      parkedSince: null,
+      idleSince: null,
+      consecutiveErrors: 0,
+      lastApiErrorAt: null,
+    });
+
+    console.log(`[Tesla Trip] STARTED (P→${shiftState}) for user=${connection.userId} at ${locationName} odo=${odometer?.toFixed(1)}`);
+    return { status: "trip_started", driveState: "driving", tripAction: "started", pollState: "active_trip" };
+  }
+
+  const idleSince = connection.idleSince ? new Date(connection.idleSince) : new Date();
+  const idleDuration = Date.now() - idleSince.getTime();
+
+  if (!isCharging && idleDuration > SLEEP_ALLOWANCE_MS) {
+    console.log(`[Tesla Poll] Idle for ${Math.round(idleDuration / 1000)}s (>${SLEEP_ALLOWANCE_MS / 1000}s) - transitioning to SLEEP_PENDING to allow car to sleep`);
+    await storage.updateTeslaConnection(connection.id, {
+      lastPolledAt: new Date(),
+      lastDriveState: "parked",
       lastShiftState: shiftState || null,
       lastLatitude: lat,
       lastLongitude: lon,
       lastOdometer: odometer,
+      pollState: "sleep_pending",
+    });
+    return { status: "sleep_pending", driveState: "parked", pollState: "sleep_pending" };
+  }
+
+  await storage.updateTeslaConnection(connection.id, {
+    lastPolledAt: new Date(),
+    lastDriveState: "parked",
+    lastShiftState: shiftState || null,
+    lastLatitude: lat,
+    lastLongitude: lon,
+    lastOdometer: odometer,
+    idleSince: connection.idleSince || new Date(),
+    consecutiveErrors: 0,
+  });
+
+  return { status: isCharging ? "charging" : "idle", driveState: "parked", pollState: "awake_idle" };
+}
+
+async function pollSleepPending(connection: TeslaConnection, token: string): Promise<PollResult> {
+  let onlineState: string;
+  try {
+    onlineState = await getVehicleOnlineState(token, connection.teslaVehicleId!);
+  } catch (err: any) {
+    if (err instanceof TeslaApiError && (err.status === 408 || err.status === 429)) {
+      console.log(`[Tesla Poll] SLEEP_PENDING: ${err.status} for user=${connection.userId} - staying in SLEEP_PENDING`);
+      await storage.updateTeslaConnection(connection.id, { lastPolledAt: new Date() });
+      return { status: "sleep_pending_error", driveState: "unknown", pollState: "sleep_pending" };
+    }
+    throw err;
+  }
+  console.log(`[Tesla Poll] SLEEP_PENDING user=${connection.userId} vehicleState=${onlineState}`);
+
+  if (onlineState === "online") {
+    console.log(`[Tesla Poll] Vehicle still online in SLEEP_PENDING for user=${connection.userId} - returning to AWAKE_IDLE to check for driving`);
+    await storage.updateTeslaConnection(connection.id, {
+      lastPolledAt: new Date(),
+      pollState: "awake_idle",
+      idleSince: connection.idleSince || new Date(),
+      consecutiveErrors: 0,
+    });
+    return { status: "woke_from_sleep_pending", driveState: "parked", pollState: "awake_idle" };
+  }
+
+  console.log(`[Tesla Poll] Vehicle fell asleep for user=${connection.userId} - transitioning to DEEP_SLEEP`);
+  await storage.updateTeslaConnection(connection.id, {
+    lastPolledAt: new Date(),
+    lastDriveState: "asleep",
+    lastShiftState: null,
+    pollState: "deep_sleep",
+    idleSince: null,
+    consecutiveErrors: 0,
+  });
+  return { status: "asleep", driveState: "asleep", pollState: "deep_sleep" };
+}
+
+async function pollActiveTrip(connection: TeslaConnection, token: string): Promise<PollResult> {
+  let vehicleData: any;
+  try {
+    vehicleData = await getVehicleData(token, connection.teslaVehicleId!);
+  } catch (err: any) {
+    if (err instanceof TeslaApiError && (err.status === 408 || err.status === 429)) {
+      console.log(`[Tesla Poll] ACTIVE_TRIP: ${err.status} for user=${connection.userId} - keeping trip open`);
+      const errors = (connection.consecutiveErrors || 0) + 1;
+      await storage.updateTeslaConnection(connection.id, {
+        lastPolledAt: new Date(),
+        consecutiveErrors: errors,
+        lastApiErrorAt: connection.lastApiErrorAt || new Date(),
+      });
+      return { status: "driving_no_data", driveState: "driving", pollState: "active_trip" };
+    }
+    throw err;
+  }
+  if (!vehicleData) {
+    console.log(`[Tesla Poll] ACTIVE_TRIP: No vehicle data for user=${connection.userId} - keeping trip open`);
+    const errors = (connection.consecutiveErrors || 0) + 1;
+    await storage.updateTeslaConnection(connection.id, {
+      lastPolledAt: new Date(),
+      consecutiveErrors: errors,
+      lastApiErrorAt: connection.lastApiErrorAt || new Date(),
+    });
+    return { status: "driving_no_data", driveState: "driving", pollState: "active_trip" };
+  }
+
+  await storage.updateTeslaConnection(connection.id, {
+    consecutiveErrors: 0,
+    lastApiErrorAt: null,
+  });
+
+  const driveState = vehicleData.drive_state;
+  const vehicleState = vehicleData.vehicle_state;
+  const shiftState = driveState?.shift_state;
+  const lat = driveState?.latitude;
+  const lon = driveState?.longitude;
+  const rawOdometer = vehicleState?.odometer;
+  const odometer = rawOdometer != null && rawOdometer > 0 ? rawOdometer * 1.60934 : null;
+
+  const isDriving = shiftState === "D" || shiftState === "R" || shiftState === "N";
+  const isParked = shiftState === "P" || (!shiftState && !isDriving);
+
+  console.log(`[Tesla Poll] ACTIVE_TRIP user=${connection.userId} shift=${shiftState || "null"} lat=${lat} lon=${lon} odo_km=${odometer?.toFixed(1)}`);
+
+  if (isDriving) {
+    await storage.updateTeslaConnection(connection.id, {
+      lastPolledAt: new Date(),
+      lastDriveState: "driving",
+      lastShiftState: shiftState,
+      lastLatitude: lat,
+      lastLongitude: lon,
+      lastOdometer: odometer,
+      parkedSince: null,
+    });
+    console.log(`[Tesla Trip] DRIVING for user=${connection.userId} lat=${lat} lon=${lon} odo=${odometer?.toFixed(1)}`);
+    return { status: "driving", driveState: "driving", pollState: "active_trip" };
+  }
+
+  if (isParked) {
+    const now = new Date();
+
+    if (!connection.parkedSince) {
+      console.log(`[Tesla Trip] Car returned to Park for user=${connection.userId} - starting ${PARKED_CONFIRMATION_MS / 1000}s confirmation timer`);
+      await storage.updateTeslaConnection(connection.id, {
+        lastPolledAt: now,
+        lastDriveState: "parked",
+        lastShiftState: shiftState || "P",
+        lastLatitude: lat,
+        lastLongitude: lon,
+        lastOdometer: odometer,
+        parkedSince: now,
+      });
+      return { status: "parked_confirming", driveState: "parked", pollState: "active_trip" };
+    }
+
+    const parkedDuration = now.getTime() - new Date(connection.parkedSince).getTime();
+
+    if (parkedDuration < PARKED_CONFIRMATION_MS) {
+      console.log(`[Tesla Trip] Still confirming park for user=${connection.userId} (${Math.round(parkedDuration / 1000)}s / ${PARKED_CONFIRMATION_MS / 1000}s)`);
+      await storage.updateTeslaConnection(connection.id, {
+        lastPolledAt: now,
+        lastDriveState: "parked",
+        lastShiftState: shiftState || "P",
+        lastLatitude: lat,
+        lastLongitude: lon,
+        lastOdometer: odometer,
+      });
+      return { status: "parked_confirming", driveState: "parked", pollState: "active_trip" };
+    }
+
+    console.log(`[Tesla Trip] Parked for ${Math.round(parkedDuration / 1000)}s - completing trip for user=${connection.userId}`);
+    await completeTrip(connection, lat, lon, odometer);
+
+    await storage.updateTeslaConnection(connection.id, {
+      lastPolledAt: now,
+      lastDriveState: "parked",
+      lastShiftState: shiftState || "P",
+      lastLatitude: lat,
+      lastLongitude: lon,
+      lastOdometer: odometer,
+      pollState: "awake_idle",
+      tripInProgress: false,
+      tripStartTime: null,
+      tripStartOdometer: null,
+      tripStartLatitude: null,
+      tripStartLongitude: null,
+      tripStartLocation: null,
+      parkedSince: null,
+      idleSince: new Date(),
     });
 
-    const wokeUp = prevDriveState === "asleep" && vehicleOnlineState === "online";
-    return { status: wokeUp ? "woke_up" : "idle", driveState: currentDriveState };
-  } catch (error: any) {
-    console.error(`Tesla polling error for user ${connection.userId}:`, error.message);
-    return { status: "error" };
+    return { status: "trip_ended", driveState: "parked", tripAction: "ended", pollState: "awake_idle" };
   }
+
+  await storage.updateTeslaConnection(connection.id, {
+    lastPolledAt: new Date(),
+    lastDriveState: "driving",
+    lastShiftState: shiftState || null,
+    lastLatitude: lat,
+    lastLongitude: lon,
+    lastOdometer: odometer,
+  });
+  return { status: "driving", driveState: "driving", pollState: "active_trip" };
 }
 
 async function completeTrip(
@@ -536,8 +709,6 @@ async function completeTrip(
     endOdo = startOdo + (distance || 0);
   }
 
-  const MIN_DISTANCE_KM = 0.1;
-
   if (distance != null && distance >= MIN_DISTANCE_KM) {
     const endLocationName = endLat && endLon ? await reverseGeocode(endLat, endLon) : "Unknown";
     const geofencesList = await storage.getGeofences(connection.userId);
@@ -583,37 +754,46 @@ async function completeTrip(
   }
 }
 
-export async function pollVehicleStateForUser(userId: string): Promise<{
-  status: string;
-  driveState?: string;
-  tripAction?: string;
-} | null> {
+export async function pollVehicleStateForUser(userId: string): Promise<PollResult | null> {
   const connection = await storage.getTeslaConnection(userId);
   if (!connection) return null;
   return pollSingleConnection(connection);
 }
 
-function getNextPollInterval(results: Array<{ status: string; driveState?: string } | null>): number {
-  const hasDriving = results.some((r) => r?.driveState === "driving");
-  const hasTripPending = results.some((r) => r?.status === "asleep_trip_pending");
-  const hasParkedConfirming = results.some((r) => r?.status === "parked_confirming");
-  const hasWokeUp = results.some((r) => r?.status === "woke_up");
-  const hasParked = results.some((r) => r?.driveState === "parked");
+function getNextPollInterval(results: Array<PollResult | null>): number {
+  let minInterval = POLL_DEEP_SLEEP_MS;
 
-  if (hasDriving) return POLL_INTERVAL_DRIVING;
-  if (hasTripPending || hasParkedConfirming || hasWokeUp) return POLL_INTERVAL_MONITORING;
-  if (hasParked) return POLL_INTERVAL_MONITORING;
-  return POLL_INTERVAL_IDLE;
+  for (const r of results) {
+    if (!r) continue;
+    let interval = POLL_DEEP_SLEEP_MS;
+    switch (r.pollState) {
+      case "active_trip":
+        interval = r.status === "parked_confirming" ? POLL_PARKED_CONFIRMING_MS : POLL_ACTIVE_TRIP_MS;
+        break;
+      case "awake_idle":
+        interval = POLL_AWAKE_IDLE_MS;
+        break;
+      case "sleep_pending":
+        interval = POLL_SLEEP_CHECK_MS;
+        break;
+    }
+    if (interval < minInterval) minInterval = interval;
+  }
+
+  return minInterval;
 }
+
+let pollingTimeout: ReturnType<typeof setTimeout> | null = null;
+let isPollingActive = false;
 
 async function pollAllConnections(): Promise<number> {
   const connections = await storage.getAllActiveTeslaConnections();
   if (connections.length === 0) {
     console.log("[Tesla Poll] No active connections - stopping polling");
     stopPolling();
-    return POLL_INTERVAL_IDLE;
+    return POLL_DEEP_SLEEP_MS;
   }
-  const results: Array<{ status: string; driveState?: string } | null> = [];
+  const results: Array<PollResult | null> = [];
   for (const conn of connections) {
     try {
       const result = await pollSingleConnection(conn);
@@ -636,7 +816,7 @@ async function pollLoop() {
   } catch (err: any) {
     console.error("Polling error:", err.message);
     if (isPollingActive) {
-      pollingTimeout = setTimeout(pollLoop, POLL_INTERVAL_IDLE);
+      pollingTimeout = setTimeout(pollLoop, POLL_DEEP_SLEEP_MS);
     }
   }
 }
@@ -644,7 +824,13 @@ async function pollLoop() {
 export function startPolling() {
   stopPolling();
   isPollingActive = true;
-  console.log(`Starting Tesla polling (driving=${POLL_INTERVAL_DRIVING / 1000}s, monitoring=${POLL_INTERVAL_MONITORING / 1000}s, idle=${POLL_INTERVAL_IDLE / 1000}s, park-confirm=${PARKED_CONFIRMATION_MS / 1000}s)`);
+  console.log(`[Tesla Polling] Started - Sleep-Aware State Machine`);
+  console.log(`  Deep Sleep: check /vehicles every ${POLL_DEEP_SLEEP_MS / 1000}s`);
+  console.log(`  Awake Idle: poll /vehicle_data every ${POLL_AWAKE_IDLE_MS / 1000}s`);
+  console.log(`  Active Trip: poll /vehicle_data every ${POLL_ACTIVE_TRIP_MS / 1000}s`);
+  console.log(`  Sleep Allowance: ${SLEEP_ALLOWANCE_MS / 1000}s idle → stop /vehicle_data to let car sleep`);
+  console.log(`  Park Confirmation: ${PARKED_CONFIRMATION_MS / 1000}s before ending trip`);
+  console.log(`  Trip Error Timeout: ${TRIP_ERROR_TIMEOUT_MS / 1000}s of 408/429 → force-close trip`);
   pollingTimeout = setTimeout(pollLoop, 5000);
 }
 
@@ -653,7 +839,7 @@ export function stopPolling() {
   if (pollingTimeout) {
     clearTimeout(pollingTimeout);
     pollingTimeout = null;
-    console.log("Stopped Tesla polling");
+    console.log("[Tesla Polling] Stopped");
   }
 }
 
@@ -663,3 +849,5 @@ export async function initTeslaPolling() {
     startPolling();
   }
 }
+
+export { getVehicleOnlineState as getVehicleState };

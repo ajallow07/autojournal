@@ -63,6 +63,10 @@ export const teslaConnections = pgTable("tesla_connections", {
   tripStartLocation: text("trip_start_location"),
   lastShiftState: text("last_shift_state"),
   parkedSince: timestamp("parked_since"),
+  pollState: text("poll_state").notNull().default("deep_sleep"),
+  idleSince: timestamp("idle_since"),
+  lastApiErrorAt: timestamp("last_api_error_at"),
+  consecutiveErrors: integer("consecutive_errors").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

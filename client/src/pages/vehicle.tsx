@@ -11,27 +11,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { Car, Save, Gauge, Calendar, Hash, Trash2, Plus, Pencil, X, Search, Loader2, Fuel, Palette } from "lucide-react";
+import { Car, Save, Gauge, Calendar, Hash, Trash2, Pencil, X, Fuel, Palette, Zap } from "lucide-react";
+import { Link } from "wouter";
 import type { Vehicle } from "@shared/schema";
-
-interface VehicleLookupResult {
-  regno: string;
-  vin: string | null;
-  make: string | null;
-  model: string | null;
-  color: string | null;
-  year: number | null;
-  fuelType: string | null;
-  firstRegistered: string | null;
-  numberOfOwners: number | null;
-}
 
 const vehicleFormSchema = z.object({
   name: z.string().min(1, "Name is required"),
   make: z.string().min(1, "Make is required"),
   model: z.string().min(1, "Model is required"),
   year: z.coerce.number().min(1900).max(2100),
-  licensePlate: z.string().min(1, "License plate is required"),
+  licensePlate: z.string().default(""),
   vin: z.string().optional().default(""),
   color: z.string().optional().default(""),
   fuelType: z.string().optional().default(""),
@@ -51,84 +40,24 @@ function fuelTypeLabel(ft: string | null | undefined): string {
   return map[ft] || ft;
 }
 
-function VehicleForm({ vehicle, onCancel }: { vehicle?: Vehicle; onCancel?: () => void }) {
+function VehicleEditForm({ vehicle, onCancel }: { vehicle: Vehicle; onCancel: () => void }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [regInput, setRegInput] = useState("");
-  const [lookupLoading, setLookupLoading] = useState(false);
-  const [lookupDone, setLookupDone] = useState(!!vehicle);
 
   const form = useForm<VehicleFormValues>({
     resolver: zodResolver(vehicleFormSchema),
-    defaultValues: vehicle
-      ? {
-          name: vehicle.name,
-          make: vehicle.make,
-          model: vehicle.model,
-          year: vehicle.year,
-          licensePlate: vehicle.licensePlate,
-          vin: vehicle.vin || "",
-          color: vehicle.color || "",
-          fuelType: vehicle.fuelType || "",
-          currentOdometer: vehicle.currentOdometer,
-        }
-      : {
-          name: "",
-          make: "",
-          model: "",
-          year: new Date().getFullYear(),
-          licensePlate: "",
-          vin: "",
-          color: "",
-          fuelType: "",
-          currentOdometer: 0,
-        },
+    defaultValues: {
+      name: vehicle.name,
+      make: vehicle.make,
+      model: vehicle.model,
+      year: vehicle.year,
+      licensePlate: vehicle.licensePlate || "",
+      vin: vehicle.vin || "",
+      color: vehicle.color || "",
+      fuelType: vehicle.fuelType || "",
+      currentOdometer: vehicle.currentOdometer,
+    },
   });
-
-  const handleLookup = async () => {
-    const cleaned = regInput.replace(/\s+/g, "").toUpperCase();
-    if (!cleaned || cleaned.length < 2) {
-      toast({ title: "Enter a registration number", variant: "destructive" });
-      return;
-    }
-
-    form.setValue("licensePlate", cleaned);
-    setLookupLoading(true);
-    try {
-      const res = await apiRequest("GET", `/api/vehicles/lookup/${encodeURIComponent(cleaned)}`);
-      const data: VehicleLookupResult = await res.json();
-
-      form.setValue("licensePlate", data.regno || cleaned);
-      if (data.make) form.setValue("make", data.make);
-      if (data.model) form.setValue("model", data.model);
-      if (data.year) form.setValue("year", data.year);
-      if (data.vin) form.setValue("vin", data.vin);
-      if (data.color) form.setValue("color", data.color);
-      if (data.fuelType) form.setValue("fuelType", data.fuelType);
-      if (data.make && data.model) {
-        form.setValue("name", `${data.make} ${data.model}`);
-      }
-
-      setLookupDone(true);
-      toast({ title: "Vehicle found", description: `${data.make} ${data.model} (${data.year})` });
-    } catch (error: any) {
-      let msg = "Could not look up vehicle";
-      let notConfigured = false;
-      try {
-        const body = await error?.json?.();
-        if (body?.message) msg = body.message;
-        if (body?.notConfigured) notConfigured = true;
-      } catch {}
-      setLookupDone(true);
-      if (notConfigured) {
-        toast({ title: "Auto-lookup not available", description: "Fill in the vehicle details manually below." });
-      } else {
-        toast({ title: "Lookup failed", description: msg, variant: "destructive" });
-      }
-    } finally {
-      setLookupLoading(false);
-    }
-  };
 
   const saveMutation = useMutation({
     mutationFn: async (values: VehicleFormValues) => {
@@ -138,64 +67,17 @@ function VehicleForm({ vehicle, onCancel }: { vehicle?: Vehicle; onCancel?: () =
         color: values.color || null,
         fuelType: values.fuelType || null,
       };
-      if (vehicle) {
-        return apiRequest("PATCH", `/api/vehicles/${vehicle.id}`, payload);
-      }
-      return apiRequest("POST", "/api/vehicles", { ...payload, isDefault: false });
+      return apiRequest("PATCH", `/api/vehicles/${vehicle.id}`, payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
-      toast({ title: vehicle ? "Vehicle updated" : "Vehicle added" });
-      if (!vehicle) {
-        form.reset();
-        setRegInput("");
-        setLookupDone(false);
-        onCancel?.();
-      }
+      toast({ title: "Vehicle updated" });
+      onCancel();
     },
     onError: (error: Error) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     },
   });
-
-  if (!vehicle && !lookupDone) {
-    return (
-      <div className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          Enter a Swedish registration number to get started. Vehicle details will be auto-filled if lookup is available.
-        </p>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Input
-            placeholder="ABC 123"
-            value={regInput}
-            onChange={(e) => setRegInput(e.target.value.toUpperCase())}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleLookup(); } }}
-            className="max-w-[200px] font-mono tracking-wider"
-            data-testid="input-reg-lookup"
-          />
-          <Button
-            onClick={handleLookup}
-            disabled={lookupLoading || !regInput.trim()}
-            data-testid="button-lookup-vehicle"
-          >
-            {lookupLoading ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <Search className="w-4 h-4 mr-2" />
-            )}
-            {lookupLoading ? "Looking up..." : "Look up"}
-          </Button>
-          <Button
-            variant="ghost"
-            onClick={() => setLookupDone(true)}
-            data-testid="button-manual-entry"
-          >
-            Enter manually
-          </Button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <Form {...form}>
@@ -326,14 +208,12 @@ function VehicleForm({ vehicle, onCancel }: { vehicle?: Vehicle; onCancel?: () =
         <div className="flex items-center gap-2 flex-wrap">
           <Button type="submit" disabled={saveMutation.isPending} data-testid="button-save-vehicle">
             <Save className="w-4 h-4 mr-2" />
-            {saveMutation.isPending ? "Saving..." : vehicle ? "Update Vehicle" : "Add Vehicle"}
+            {saveMutation.isPending ? "Saving..." : "Update Vehicle"}
           </Button>
-          {onCancel && (
-            <Button type="button" variant="outline" onClick={onCancel} data-testid="button-cancel-vehicle">
-              <X className="w-4 h-4 mr-2" />
-              Cancel
-            </Button>
-          )}
+          <Button type="button" variant="outline" onClick={onCancel} data-testid="button-cancel-vehicle">
+            <X className="w-4 h-4 mr-2" />
+            Cancel
+          </Button>
         </div>
       </form>
     </Form>
@@ -368,7 +248,7 @@ function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <VehicleForm vehicle={vehicle} onCancel={() => setEditing(false)} />
+          <VehicleEditForm vehicle={vehicle} onCancel={() => setEditing(false)} />
         </CardContent>
       </Card>
     );
@@ -450,8 +330,6 @@ function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
 }
 
 export default function VehiclePage() {
-  const [showAddForm, setShowAddForm] = useState(false);
-
   const { data: vehicles, isLoading } = useQuery<Vehicle[]>({
     queryKey: ["/api/vehicles"],
   });
@@ -468,32 +346,10 @@ export default function VehiclePage() {
 
   return (
     <div className="p-6 max-w-2xl mx-auto space-y-6">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="space-y-1">
-          <h1 className="text-xl font-semibold tracking-tight" data-testid="text-vehicle-page-title">Vehicles</h1>
-          <p className="text-sm text-muted-foreground">Manage your vehicles</p>
-        </div>
-        {!showAddForm && (
-          <Button onClick={() => setShowAddForm(true)} data-testid="button-add-vehicle">
-            <Plus className="w-4 h-4 mr-2" />
-            Add Vehicle
-          </Button>
-        )}
+      <div className="space-y-1">
+        <h1 className="text-xl font-semibold tracking-tight" data-testid="text-vehicle-page-title">Vehicles</h1>
+        <p className="text-sm text-muted-foreground">Vehicles are added automatically when you connect your Tesla</p>
       </div>
-
-      {showAddForm && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2 flex-wrap">
-              <Plus className="w-4 h-4" />
-              New Vehicle
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <VehicleForm onCancel={() => setShowAddForm(false)} />
-          </CardContent>
-        </Card>
-      )}
 
       {vehicles && vehicles.length > 0 ? (
         <div className="space-y-3">
@@ -507,8 +363,14 @@ export default function VehiclePage() {
             <div className="flex items-center justify-center w-12 h-12 rounded-md bg-muted mb-4">
               <Car className="w-6 h-6 text-muted-foreground" />
             </div>
-            <p className="text-sm font-medium">No vehicles added yet</p>
-            <p className="text-xs text-muted-foreground mt-1">Add a vehicle or connect your Tesla to get started</p>
+            <p className="text-sm font-medium">No vehicles yet</p>
+            <p className="text-xs text-muted-foreground mt-1 mb-4">Connect your Tesla account to automatically add your vehicle</p>
+            <Button asChild data-testid="button-go-to-tesla">
+              <Link href="/tesla">
+                <Zap className="w-4 h-4 mr-2" />
+                Connect Tesla
+              </Link>
+            </Button>
           </CardContent>
         </Card>
       )}

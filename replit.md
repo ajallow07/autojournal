@@ -4,6 +4,8 @@
 Mahlis Auto Journal — a smart driver's journal application for logging and managing car trips for Tesla vehicles, based in Stockholm, Sweden. Supports multi-user authentication (Google OAuth, username/password), business/private trip classification, odometer tracking, comprehensive reports with CSV export, and Tesla API integration for automatic trip logging.
 
 ## Recent Changes
+- 2026-02-17: Removed manual vehicle addition — vehicles are only created automatically via Tesla connection
+- 2026-02-17: Removed Biluppgifter vehicle lookup endpoint (no longer needed with Tesla-only vehicles)
 - 2026-02-17: Refactored Tesla polling to "perfect" journal strategy: trigger poll checks shift_state, P→D starts trip with odometer, 2-min park confirmation before ending trip, GPS backup for route
 - 2026-02-17: Polling intervals: 1min driving/monitoring, 2min idle; parkedSince/lastShiftState columns added for park confirmation
 - 2026-02-17: Trip completion extracted to separate completeTrip() function for cleaner code
@@ -71,7 +73,7 @@ shared/
 - Required secrets: SESSION_SECRET (set), GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (optional, for Google login)
 
 ## API Endpoints (all require authentication)
-- GET/POST /api/vehicles, GET/PATCH /api/vehicles/:id
+- GET /api/vehicles, GET/PATCH/DELETE /api/vehicles/:id
 - GET/POST /api/trips, GET/PATCH/DELETE /api/trips/:id
 - GET /api/tesla/status, GET /api/tesla/auth, GET /api/tesla/callback
 - POST /api/tesla/disconnect, POST /api/tesla/poll, POST /api/tesla/link-vehicle
@@ -95,19 +97,10 @@ shared/
 - Trips marked with autoLogged=true when created by Tesla integration
 - GPS distance fallback when odometer unavailable; noted in trip notes
 
-## Vehicle Registry Lookup (Biluppgifter API)
-- Endpoint: GET /api/vehicles/lookup/:regno
-- Uses Biluppgifter API (https://api.biluppgifter.se/api/v1/vehicle/regno/) for Swedish vehicle registry data
-- Requires BILUPPGIFTER_API_KEY secret
-- Returns: make, model, year, color, VIN, fuel type from Transportstyrelsen registry
-- Frontend: Add vehicle flow starts with reg number lookup, auto-fills all fields
-- Vehicle schema includes: vin, color, fuelType columns
-- Graceful fallback: manual entry available if API key not configured
-
 ## Key Features
 - Multi-user authentication with username/password and Google login
-- Vehicle lookup by registration number (Biluppgifter API / Transportstyrelsen data)
-- Manual and automatic trip logging with odometer, locations, time, and purpose
+- Tesla-only vehicle management (vehicles auto-created when Tesla connects)
+- Automatic trip logging with odometer, locations, time, and purpose (Tesla API)
 - Business/private trip classification (manual or via geofences)
 - Monthly, custom period, and yearly overview reports
 - CSV export for tax/accounting

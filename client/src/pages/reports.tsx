@@ -209,7 +209,7 @@ export default function Reports() {
                     <div className="flex-1 flex h-5 rounded-md overflow-hidden bg-muted">
                       {m.business > 0 && (
                         <div
-                          className="bg-primary h-full transition-all duration-500"
+                          className="bg-chart-1 h-full transition-all duration-500"
                           style={{ width: `${(m.business / maxMonthDistance) * 100}%` }}
                         />
                       )}
@@ -231,7 +231,7 @@ export default function Reports() {
               </div>
               <div className="flex items-center gap-4 mt-4 flex-wrap">
                 <div className="flex items-center gap-1.5">
-                  <div className="w-2.5 h-2.5 rounded-sm bg-primary" />
+                  <div className="w-2.5 h-2.5 rounded-sm bg-chart-1" />
                   <span className="text-xs text-muted-foreground">Business</span>
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -288,9 +288,12 @@ function TripTable({ trips }: { trips: Trip[] }) {
   if (sorted.length === 0) {
     return (
       <Card>
-        <CardContent className="py-12 text-center">
-          <BarChart3 className="w-10 h-10 text-muted-foreground/50 mx-auto mb-3" />
-          <p className="text-sm text-muted-foreground">No trips in this period</p>
+        <CardContent className="py-16 text-center">
+          <div className="flex items-center justify-center w-12 h-12 rounded-md bg-muted mx-auto mb-4">
+            <BarChart3 className="w-6 h-6 text-muted-foreground" />
+          </div>
+          <p className="text-sm font-medium">No trips in this period</p>
+          <p className="text-xs text-muted-foreground mt-1">Select a different date range to see data</p>
         </CardContent>
       </Card>
     );

@@ -1,8 +1,9 @@
 import { useLocation, Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
-import { LayoutDashboard, Route, Plus, BarChart3, Car, Zap, Circle, User, LogOut } from "lucide-react";
+import { LayoutDashboard, Route, BarChart3, Car, Zap, Circle, User, LogOut, MapPin, Plus } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import {
   Sidebar,
   SidebarContent,
@@ -14,6 +15,7 @@ import {
   SidebarMenuItem,
   SidebarHeader,
   SidebarFooter,
+  SidebarSeparator,
 } from "@/components/ui/sidebar";
 
 const navItems = [
@@ -21,9 +23,12 @@ const navItems = [
   { title: "Trip Log", url: "/trips", icon: Route },
   { title: "Add Trip", url: "/trips/new", icon: Plus },
   { title: "Reports", url: "/reports", icon: BarChart3 },
+];
+
+const settingsItems = [
   { title: "Vehicles", url: "/vehicle", icon: Car },
   { title: "Tesla", url: "/tesla", icon: Zap },
-  { title: "User Profile", url: "/profile", icon: User },
+  { title: "Profile", url: "/profile", icon: User },
 ];
 
 function TeslaStatusIndicator() {
@@ -36,13 +41,22 @@ function TeslaStatusIndicator() {
 
   const conn = data.connection;
   const isDriving = conn?.tripInProgress;
+  const state = conn?.lastDriveState;
 
   return (
-    <div className="flex items-center gap-2" data-testid="tesla-status-indicator">
-      <Circle className={`w-2 h-2 ${isDriving ? "fill-green-500 text-green-500 animate-pulse" : "fill-muted-foreground text-muted-foreground"}`} />
-      <span className="text-xs text-muted-foreground">
-        Tesla {isDriving ? "driving" : "connected"}
-      </span>
+    <div className="mx-3 mb-2 p-2.5 rounded-md bg-sidebar-accent" data-testid="tesla-status-indicator">
+      <div className="flex items-center gap-2">
+        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${isDriving ? "bg-green-400 animate-pulse" : state === "asleep" ? "bg-amber-400" : "bg-emerald-400"}`} />
+        <span className="text-xs font-medium text-sidebar-foreground">
+          Tesla {isDriving ? "Driving" : state === "asleep" ? "Asleep" : "Connected"}
+        </span>
+      </div>
+      {isDriving && (
+        <div className="flex items-center gap-1.5 mt-1.5 ml-4">
+          <MapPin className="w-3 h-3 text-sidebar-foreground/60" />
+          <span className="text-[11px] text-sidebar-foreground/60">Trip in progress</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -56,26 +70,53 @@ export function AppSidebar() {
 
   return (
     <Sidebar>
-      <SidebarHeader className="p-4">
+      <SidebarHeader className="p-4 pb-3">
         <Link href="/" className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-9 h-9 rounded-md bg-primary">
-            <Car className="w-5 h-5 text-primary-foreground" />
+          <div className="flex items-center justify-center w-9 h-9 rounded-md bg-sidebar-primary">
+            <Car className="w-5 h-5 text-sidebar-primary-foreground" />
           </div>
           <div>
-            <h1 className="text-sm font-semibold leading-tight">Körjournal</h1>
-            <p className="text-xs text-muted-foreground">Tesla Model Y</p>
+            <h1 className="text-sm font-bold text-sidebar-foreground leading-tight tracking-tight">Körjournal</h1>
+            <p className="text-[10px] text-sidebar-foreground/40 uppercase tracking-wider">AutoJournal</p>
           </div>
         </Link>
       </SidebarHeader>
+      <SidebarSeparator />
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+          <SidebarGroupLabel className="text-sidebar-foreground/40 uppercase text-[11px] tracking-wider font-semibold">Main</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {navItems.map((item) => {
                 const isActive = item.url === "/"
                   ? location === "/"
-                  : location.startsWith(item.url);
+                  : item.url === "/trips/new"
+                    ? location === "/trips/new"
+                    : location.startsWith(item.url);
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={isActive}
+                      data-testid={`nav-${item.title.toLowerCase().replace(/\s/g, "-")}`}
+                    >
+                      <Link href={item.url}>
+                        <item.icon className="w-4 h-4" />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel className="text-sidebar-foreground/40 uppercase text-[11px] tracking-wider font-semibold">Settings</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {settingsItems.map((item) => {
+                const isActive = location.startsWith(item.url);
                 return (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton
@@ -95,20 +136,21 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter className="p-4 space-y-3">
+      <SidebarFooter className="p-0 pb-2">
         <TeslaStatusIndicator />
+        <SidebarSeparator />
         {user && (
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 px-4 pt-3 pb-1">
             <Avatar className="w-8 h-8">
               <AvatarImage src={user.profileImageUrl || undefined} alt={displayName} />
-              <AvatarFallback className="text-xs">{initials}</AvatarFallback>
+              <AvatarFallback className="text-xs bg-sidebar-accent text-sidebar-accent-foreground">{initials}</AvatarFallback>
             </Avatar>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium truncate" data-testid="text-sidebar-user-name">{displayName}</p>
-              <p className="text-xs text-muted-foreground truncate">{user.email || ""}</p>
+              <p className="text-xs font-medium text-sidebar-foreground truncate" data-testid="text-sidebar-user-name">{displayName}</p>
+              <p className="text-[10px] text-sidebar-foreground/40 truncate">{user.email || ""}</p>
             </div>
-            <button onClick={() => logout()} data-testid="button-sidebar-logout">
-              <LogOut className="w-3.5 h-3.5 text-muted-foreground" />
+            <button onClick={() => logout()} className="text-sidebar-foreground/40 hover:text-sidebar-foreground transition-colors" data-testid="button-sidebar-logout">
+              <LogOut className="w-3.5 h-3.5" />
             </button>
           </div>
         )}

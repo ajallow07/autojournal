@@ -210,8 +210,8 @@ function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
       <CardContent className="p-4">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-4 flex-wrap">
-            <div className="flex items-center justify-center w-12 h-12 rounded-md bg-primary/10">
-              <Car className="w-6 h-6 text-primary" />
+            <div className="flex items-center justify-center w-12 h-12 rounded-md bg-chart-1/15">
+              <Car className="w-6 h-6 text-chart-1" />
             </div>
             <div className="min-w-0">
               <p className="text-base font-semibold" data-testid={`text-vehicle-name-${vehicle.id}`}>{vehicle.name}</p>
@@ -313,9 +313,11 @@ export default function VehiclePage() {
         </div>
       ) : (
         <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-            <Car className="w-10 h-10 text-muted-foreground/50 mb-3" />
-            <p className="text-sm font-medium text-muted-foreground">No vehicles added yet</p>
+          <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="flex items-center justify-center w-12 h-12 rounded-md bg-muted mb-4">
+              <Car className="w-6 h-6 text-muted-foreground" />
+            </div>
+            <p className="text-sm font-medium">No vehicles added yet</p>
             <p className="text-xs text-muted-foreground mt-1">Add a vehicle or connect your Tesla to get started</p>
           </CardContent>
         </Card>

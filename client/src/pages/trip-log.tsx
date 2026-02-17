@@ -128,8 +128,10 @@ export default function TripLog() {
         <CardContent className="p-0">
           {filteredTrips.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center px-4">
-              <Route className="w-10 h-10 text-muted-foreground/50 mb-3" />
-              <p className="text-sm font-medium text-muted-foreground">
+              <div className="flex items-center justify-center w-12 h-12 rounded-md bg-muted mb-4">
+                <Route className="w-6 h-6 text-muted-foreground" />
+              </div>
+              <p className="text-sm font-medium">
                 {search || typeFilter !== "all" ? "No matching trips found" : "No trips logged yet"}
               </p>
               <p className="text-xs text-muted-foreground mt-1">
@@ -147,9 +149,9 @@ export default function TripLog() {
                     data-testid={`trip-item-${trip.id}`}
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <div className={`flex items-center justify-center w-8 h-8 rounded-md flex-shrink-0 ${trip.tripType === "business" ? "bg-primary/10" : "bg-chart-3/10"}`}>
+                      <div className={`flex items-center justify-center w-8 h-8 rounded-md flex-shrink-0 ${trip.tripType === "business" ? "bg-chart-1/15" : "bg-chart-3/15"}`}>
                         {trip.tripType === "business" ? (
-                          <Briefcase className="w-3.5 h-3.5 text-primary" />
+                          <Briefcase className="w-3.5 h-3.5 text-chart-1" />
                         ) : (
                           <Home className="w-3.5 h-3.5 text-chart-3" />
                         )}

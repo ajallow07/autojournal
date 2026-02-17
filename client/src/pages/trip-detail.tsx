@@ -60,9 +60,9 @@ export default function TripDetail() {
         <CardContent className="p-4 space-y-4">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div className="flex items-center gap-3">
-              <div className={`flex items-center justify-center w-10 h-10 rounded-md ${trip.tripType === "business" ? "bg-primary/10" : "bg-chart-3/10"}`}>
+              <div className={`flex items-center justify-center w-10 h-10 rounded-md ${trip.tripType === "business" ? "bg-chart-1/15" : "bg-chart-3/15"}`}>
                 {trip.tripType === "business" ? (
-                  <Briefcase className="w-5 h-5 text-primary" />
+                  <Briefcase className="w-5 h-5 text-chart-1" />
                 ) : (
                   <Home className="w-5 h-5 text-chart-3" />
                 )}

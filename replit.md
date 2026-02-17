@@ -92,9 +92,11 @@ shared/
 - Endpoint separation: `/vehicles/{id}` (state check, doesn't wake car) vs `/vehicle_data` (full payload, resets sleep timer)
 - 2-min park confirmation before ending trip (prevents false trip-ends at red lights)
 - Sleep allowance: after 15min idle, stops polling vehicle_data to allow car's ~15min sleep timer
-- Error resilience: 408/429 errors during active trip keep trip open; force-closes after 10min of continuous errors
+- Error resilience: 408/429 errors handled gracefully in ALL states (deep_sleep, sleep_pending stay put; active_trip keeps trip open; force-closes after 10min)
 - Token refresh with 60s buffer before expiry to prevent missed trip starts
-- Wake-up with retry (3 attempts) when trip needs completing and car sleeps
+- Wake-up with retry (3 attempts) when trip needs completing and car sleeps; resets error counters on successful wake
+- Sleep-pending → awake_idle preserves idleSince to prevent infinite sleep-loop (vampire drain protection)
+- **Crash recovery**: All trip state persisted in DB (tripInProgress, tripStartTime, odometer, GPS, pollState, idleSince). On server restart, initTeslaPolling detects in-progress trips and corrects pollState to active_trip if stuck in deep_sleep/sleep_pending
 - Reverse geocoding via OpenStreetMap Nominatim
 - Geofencing for automatic business/private classification per user
 - Trips marked with autoLogged=true when created by Tesla integration

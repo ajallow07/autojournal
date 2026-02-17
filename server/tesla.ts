@@ -845,9 +845,32 @@ export function stopPolling() {
 
 export async function initTeslaPolling() {
   const connections = await storage.getAllActiveTeslaConnections();
-  if (connections.length > 0) {
-    startPolling();
+  if (connections.length === 0) {
+    console.log("[Tesla Polling] No active connections found at startup");
+    return;
   }
+
+  console.log(`[Tesla Polling] Startup recovery: ${connections.length} active connection(s)`);
+  for (const conn of connections) {
+    const state = conn.pollState || "deep_sleep";
+    const tripActive = conn.tripInProgress;
+    if (tripActive) {
+      console.log(`[Tesla Polling] RECOVERY: Connection ${conn.id} (user=${conn.userId}) has active trip started at ${conn.tripStartTime} - pollState=${state}`);
+      console.log(`[Tesla Polling]   Trip start: odo=${conn.tripStartOdometer}, lat=${conn.tripStartLatitude}, lng=${conn.tripStartLongitude}`);
+      if (state === "deep_sleep" || state === "sleep_pending") {
+        console.log(`[Tesla Polling]   Correcting pollState from ${state} to active_trip for in-progress trip`);
+        await storage.updateTeslaConnection(conn.id, {
+          pollState: "active_trip",
+          consecutiveErrors: 0,
+          lastApiErrorAt: null,
+        });
+      }
+    } else {
+      console.log(`[Tesla Polling] Connection ${conn.id} (user=${conn.userId}): pollState=${state}, no active trip`);
+    }
+  }
+
+  startPolling();
 }
 
 export { getVehicleOnlineState as getVehicleState };

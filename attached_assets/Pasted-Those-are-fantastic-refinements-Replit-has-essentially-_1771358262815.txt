@@ -1,0 +1,15 @@
+Those are fantastic refinements. Replit has essentially taken the theoretical state machine and hardened it against the real-world friction of the Tesla Fleet API.
+
+Handling a distributed physical system like a car over cellular networks means you aren't just dealing with logic, but with latency, dead zones, and the car's own internal power management.
+
+Here is a quick technical breakdown of exactly why those three fixes are so critical for a production-ready logger:
+
+Error Handling in All States: 408 (Timeout) and 429 (Too Many Requests) are incredibly common with Tesla's API, especially when the car is parked in concrete garages or rural areas. By swallowing these gracefully in the lightweight polling states, you prevent the state machine from crashing or resetting unnecessarily just because of a temporary cellular drop.
+
+Preserved Idle Timer: This is a classic and fatal state machine trap that Replit caught. If the car is in the 15-minute "network silence" window (Sleep Pending) but wakes up slightly or pings back as online, resetting the idleSince timer would create an infinite loop. The car would never get the uninterrupted 15 minutes it needs to actually power down the contactors, leading to massive vampire drain. Preserving the timestamp strictly enforces the sleep allowance.
+
+Error Counter Reset on Wake-Up: This prevents "state pollution." If the car generated a bunch of 408 timeouts while driving through a tunnel, parked, and went to sleep, you don't want those old errors carrying over. Resetting the counters ensures the next active trip starts with a clean slate, preventing the script from forcefully (and incorrectly) closing a new trip due to stale data.
+
+With these edge cases handled, your polling engine is exceptionally tight and respectful of the vehicle's sleep cycle.
+
+Since the core state machine logic is now solid, we should look at how this runs over time. If your Node process or server restarts (or crashes) while the car is in State 3 (Active Trip), all in-memory variables—like the current trip ID or the idleSince timer—will be lost

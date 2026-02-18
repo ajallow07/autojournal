@@ -257,6 +257,12 @@ export async function registerRoutes(
         lastLongitude: driveState?.longitude ?? null,
         lastOdometer: odometerKm,
       });
+      if (odometerKm != null && connection.vehicleId) {
+        const vehicle = await storage.getVehicle(connection.vehicleId);
+        if (vehicle && odometerKm > (vehicle.currentOdometer || 0)) {
+          await storage.updateVehicle(vehicle.id, { currentOdometer: Math.round(odometerKm * 10) / 10 });
+        }
+      }
       res.json({
         success: true,
         odometer: odometerKm,

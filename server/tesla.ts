@@ -192,10 +192,10 @@ async function getVehicleOnlineState(token: string, teslaVehicleId: string): Pro
   return vehicle?.state || "unknown";
 }
 
-async function getVehicleData(token: string, vehicleId: string): Promise<any> {
+async function getVehicleData(token: string, vehicleIdOrVin: string): Promise<any> {
   const data = await teslaApiGet(
     token,
-    `/api/1/vehicles/${vehicleId}/vehicle_data?endpoints=location_data;vehicle_state;drive_state;charge_state`
+    `/api/1/vehicles/${vehicleIdOrVin}/vehicle_data?endpoints=location_data%3Bvehicle_state%3Bdrive_state%3Bcharge_state`
   );
   return data.response;
 }
@@ -399,9 +399,10 @@ async function pollDeepSleep(connection: TeslaConnection, token: string): Promis
 }
 
 async function pollAwakeIdle(connection: TeslaConnection, token: string): Promise<PollResult> {
+  const vehicleIdForData = connection.vin || connection.teslaVehicleId!;
   let vehicleData: any;
   try {
-    vehicleData = await getVehicleData(token, connection.teslaVehicleId!);
+    vehicleData = await getVehicleData(token, vehicleIdForData);
   } catch (err: any) {
     if (err instanceof TeslaApiError && (err.status === 408 || err.status === 429)) {
       console.log(`[Tesla Poll] AWAKE_IDLE: ${err.status} for user=${connection.userId} - transitioning to DEEP_SLEEP`);
@@ -440,8 +441,14 @@ async function pollAwakeIdle(connection: TeslaConnection, token: string): Promis
   const isCharging = chargeState?.charging_state === "Charging";
 
   if (rawOdometer == null) {
-    console.log(`[Tesla Debug] vehicle_state keys: ${vehicleState ? Object.keys(vehicleState).join(", ") : "NULL"}`);
+    console.log(`[Tesla Debug] AWAKE_IDLE vehicle_state keys: ${vehicleState ? Object.keys(vehicleState).join(", ") : "NULL"}`);
     console.log(`[Tesla Debug] Top-level response keys: ${Object.keys(vehicleData).join(", ")}`);
+    if (vehicleState) {
+      const relevantKeys = ["odometer", "car_version", "api_version", "vehicle_name"];
+      const subset: any = {};
+      for (const k of relevantKeys) { if (k in vehicleState) subset[k] = vehicleState[k]; }
+      console.log(`[Tesla Debug] vehicle_state subset: ${JSON.stringify(subset)}`);
+    }
   }
 
   const isDriving = shiftState === "D" || shiftState === "R" || shiftState === "N";
@@ -543,9 +550,10 @@ async function pollSleepPending(connection: TeslaConnection, token: string): Pro
 }
 
 async function pollActiveTrip(connection: TeslaConnection, token: string): Promise<PollResult> {
+  const vehicleIdForData = connection.vin || connection.teslaVehicleId!;
   let vehicleData: any;
   try {
-    vehicleData = await getVehicleData(token, connection.teslaVehicleId!);
+    vehicleData = await getVehicleData(token, vehicleIdForData);
   } catch (err: any) {
     if (err instanceof TeslaApiError && (err.status === 408 || err.status === 429)) {
       console.log(`[Tesla Poll] ACTIVE_TRIP: ${err.status} for user=${connection.userId} - keeping trip open`);

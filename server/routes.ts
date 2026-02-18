@@ -4,25 +4,12 @@ import { storage } from "./storage";
 import { insertVehicleSchema, insertTripSchema, insertGeofenceSchema } from "@shared/schema";
 import { setupAuth, isAuthenticated } from "./auth";
 import {
-  getAuthUrl,
-  exchangeCodeForTokens,
-  listTeslaVehicles,
-  pollVehicleStateForUser,
-  startPolling,
-  stopPolling,
-  initTeslaPolling,
-  registerPartnerAccount,
-} from "./tesla";
-import {
   isTeslemetryConfigured,
   handleTelemetryWebhook,
   setupTeslemetryConnection,
   fetchTeslemetryVehicleData,
   getWebhookUrl,
 } from "./teslemetry";
-import crypto from "crypto";
-
-let pendingOAuthStates: Map<string, string> = new Map();
 
 function getUserId(req: any): string {
   const userId = req.user?.id;
@@ -136,13 +123,11 @@ export async function registerRoutes(
   app.get("/api/tesla/status", isAuthenticated, async (req, res) => {
     const userId = getUserId(req);
     const connection = await storage.getTeslaConnection(userId);
-    const hasDirectCredentials = !!(process.env.TESLA_CLIENT_ID && process.env.TESLA_CLIENT_SECRET);
     const hasTeslemetry = isTeslemetryConfigured();
     res.json({
-      configured: hasDirectCredentials || hasTeslemetry,
+      configured: hasTeslemetry,
       connected: !!connection?.isActive,
       teslemetryConfigured: hasTeslemetry,
-      directApiConfigured: hasDirectCredentials,
       webhookUrl: hasTeslemetry ? getWebhookUrl() : null,
       connection: connection ? {
         id: connection.id,
@@ -162,126 +147,12 @@ export async function registerRoutes(
     });
   });
 
-  app.post("/api/tesla/register", isAuthenticated, async (req, res) => {
-    try {
-      const result = await registerPartnerAccount();
-      res.json(result);
-    } catch (error: any) {
-      console.error("Tesla partner registration error:", error.message);
-      res.status(500).json({ message: error.message });
-    }
-  });
-
-  app.get("/api/tesla/auth", isAuthenticated, (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const state = crypto.randomBytes(16).toString("hex");
-      pendingOAuthStates.set(state, userId);
-      const url = getAuthUrl(state);
-      res.json({ url, state });
-    } catch (error: any) {
-      res.status(400).json({ message: error.message });
-    }
-  });
-
-  app.get("/api/tesla/callback", async (req, res) => {
-    const { code, state } = req.query;
-    if (!code || typeof code !== "string") {
-      return res.status(400).send("Missing authorization code");
-    }
-    if (!state || typeof state !== "string" || !pendingOAuthStates.has(state)) {
-      return res.status(400).send("Invalid OAuth state - possible CSRF attack");
-    }
-    const userId = pendingOAuthStates.get(state)!;
-    pendingOAuthStates.delete(state);
-
-    try {
-      const tokens = await exchangeCodeForTokens(code);
-      const teslaVehicles = await listTeslaVehicles(tokens.access_token);
-
-      if (teslaVehicles.length === 0) {
-        return res.status(400).send("No Tesla vehicles found on this account");
-      }
-
-      const teslaVehicle = teslaVehicles[0];
-      const userVehicles = await storage.getVehicles(userId);
-      let linkedVehicle = userVehicles.find((v) => v.isDefault) || userVehicles[0];
-
-      if (!linkedVehicle) {
-        const displayName = teslaVehicle.display_name || "Tesla";
-        const vinStr = teslaVehicle.vin || "";
-        let make = "Tesla";
-        let model = "Vehicle";
-        if (vinStr.length >= 4) {
-          const modelChar = vinStr[3];
-          if (modelChar === "Y" || modelChar === "E") model = "Model Y";
-          else if (modelChar === "S" || modelChar === "A") model = "Model S";
-          else if (modelChar === "X" || modelChar === "B") model = "Model X";
-          else if (modelChar === "3" || modelChar === "W") model = "Model 3";
-        }
-        const currentYear = new Date().getFullYear();
-        linkedVehicle = await storage.createVehicle({
-          userId,
-          name: displayName,
-          make,
-          model,
-          year: currentYear,
-          licensePlate: "",
-          currentOdometer: 0,
-          isDefault: true,
-        });
-      }
-
-      const existing = await storage.getTeslaConnection(userId);
-      if (existing) {
-        await storage.updateTeslaConnection(existing.id, {
-          accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token,
-          tokenExpiresAt: new Date(Date.now() + tokens.expires_in * 1000),
-          teslaVehicleId: String(teslaVehicle.id),
-          vin: teslaVehicle.vin,
-          vehicleName: teslaVehicle.display_name || `Tesla ${teslaVehicle.vin}`,
-          isActive: true,
-          vehicleId: linkedVehicle.id,
-        });
-      } else {
-        await storage.createTeslaConnection({
-          userId,
-          accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token,
-          tokenExpiresAt: new Date(Date.now() + tokens.expires_in * 1000),
-          teslaVehicleId: String(teslaVehicle.id),
-          vin: teslaVehicle.vin,
-          vehicleName: teslaVehicle.display_name || `Tesla ${teslaVehicle.vin}`,
-          isActive: true,
-          vehicleId: linkedVehicle.id,
-        });
-      }
-
-      startPolling();
-      res.redirect("/tesla");
-    } catch (error: any) {
-      console.error("Tesla callback error:", error.message);
-      res.status(500).send(`Tesla authentication failed: ${error.message}`);
-    }
-  });
-
   app.post("/api/tesla/disconnect", isAuthenticated, async (req, res) => {
     const userId = getUserId(req);
     const connection = await storage.getTeslaConnection(userId);
     if (!connection) return res.status(404).json({ message: "No Tesla connection found" });
     await storage.deleteTeslaConnection(connection.id);
     res.json({ success: true });
-  });
-
-  app.post("/api/tesla/poll", isAuthenticated, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const result = await pollVehicleStateForUser(userId);
-      res.json(result || { status: "no_connection" });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
   });
 
   app.post("/api/tesla/link-vehicle", isAuthenticated, async (req, res) => {
@@ -398,8 +269,6 @@ export async function registerRoutes(
       res.status(500).json({ message: error.message });
     }
   });
-
-  await initTeslaPolling();
 
   return httpServer;
 }

@@ -1,22 +1,15 @@
 # Mahlis Auto Journal - Smart Driver's Journal
 
 ## Overview
-Mahlis Auto Journal — a smart driver's journal application for logging and managing car trips for Tesla vehicles, based in Stockholm, Sweden. Supports multi-user authentication (Google OAuth, username/password), business/private trip classification, odometer tracking, comprehensive reports with CSV export, and Tesla API integration for automatic trip logging.
+Mahlis Auto Journal — a smart driver's journal application for logging and managing car trips for Tesla vehicles, based in Stockholm, Sweden. Supports multi-user authentication (Google OAuth, username/password), business/private trip classification, odometer tracking, comprehensive reports with CSV export, and Teslemetry webhook integration for automatic trip logging.
 
 ## Recent Changes
-- 2026-02-18: Added Teslemetry webhook integration as alternative to direct Tesla API polling
+- 2026-02-18: Removed direct Tesla API polling — now Teslemetry-only (deleted server/tesla.ts)
+- 2026-02-18: Removed Tesla OAuth routes (auth, callback, register, poll) — connection via Teslemetry only
+- 2026-02-18: Simplified Tesla page frontend to Teslemetry-only UI
+- 2026-02-18: Added Teslemetry webhook integration with real-time telemetry
 - 2026-02-18: New endpoints: POST /api/teslemetry/webhook (unauthenticated), POST /api/teslemetry/connect, POST /api/teslemetry/refresh
-- 2026-02-18: New server/teslemetry.ts module for webhook processing, trip detection, and Teslemetry REST API
-- 2026-02-18: Tesla page UI updated to show Teslemetry connection option, webhook URL, and copy button
-- 2026-02-18: Fixed all LSP errors in routes.ts (req.params type casting)
 - 2026-02-17: Removed manual vehicle addition — vehicles are only created automatically via Tesla connection
-- 2026-02-17: Removed Biluppgifter vehicle lookup endpoint (no longer needed with Tesla-only vehicles)
-- 2026-02-17: Refactored Tesla polling to "perfect" journal strategy: trigger poll checks shift_state, P→D starts trip with odometer, 2-min park confirmation before ending trip, GPS backup for route
-- 2026-02-17: Polling intervals: 1min driving/monitoring, 2min idle; parkedSince/lastShiftState columns added for park confirmation
-- 2026-02-17: Trip completion extracted to separate completeTrip() function for cleaner code
-- 2026-02-17: GPS haversine distance as fallback when odometer data unavailable
-- 2026-02-17: Vehicle odometer auto-updates after each trip; GPS-estimated trips noted in trip notes
-- 2026-02-17: Auto-create vehicle when Tesla connects (VIN parsing for model detection)
 - 2026-02-17: Multi-vehicle management with per-vehicle edit/delete; delete protection if trips exist (409)
 - 2026-02-17: Removed manual trip entry from Dashboard - trips auto-logged only via Tesla
 - 2026-02-16: Replaced Replit Auth with custom auth (username/password + Google OAuth via passport-local/passport-google-oauth20)
@@ -59,8 +52,7 @@ server/
   db.ts          - Shared database connection (drizzle + pg pool)
   routes.ts      - API endpoints with auth middleware
   storage.ts     - Database storage layer with userId filtering
-  tesla.ts       - Tesla API service (multi-user polling, trip detection)
-  teslemetry.ts  - Teslemetry webhook handler and REST API client
+  teslemetry.ts  - Teslemetry webhook handler, REST API client, trip detection
   seed.ts        - Database seeding (minimal)
 
 shared/
@@ -81,8 +73,7 @@ shared/
 ## API Endpoints (all require authentication unless noted)
 - GET /api/vehicles, GET/PATCH/DELETE /api/vehicles/:id
 - GET/POST /api/trips, GET/PATCH/DELETE /api/trips/:id
-- GET /api/tesla/status, GET /api/tesla/auth, GET /api/tesla/callback
-- POST /api/tesla/disconnect, POST /api/tesla/poll, POST /api/tesla/link-vehicle
+- GET /api/tesla/status, POST /api/tesla/disconnect, POST /api/tesla/link-vehicle
 - POST /api/teslemetry/webhook (**unauthenticated** - receives Teslemetry telemetry data)
 - POST /api/teslemetry/connect (connects via Teslemetry API, creates vehicle + connection)
 - POST /api/teslemetry/refresh (fetches latest vehicle_data from Teslemetry API)
@@ -90,50 +81,32 @@ shared/
 - POST /api/auth/register, POST /api/auth/login, POST /api/auth/logout
 - GET /api/auth/user, GET /api/auth/google, GET /api/auth/google/callback
 
-## Tesla Integration
-- OAuth 2.0 flow with Tesla Fleet API (EU endpoint: fleet-api.prd.eu.vn.cloud.tesla.com)
-- Requires TESLA_CLIENT_ID and TESLA_CLIENT_SECRET secrets
-- **Sleep-Aware State Machine** polling algorithm with 4 states:
-  - **DEEP_SLEEP**: Vehicle asleep/offline. Only polls lightweight `/vehicles` endpoint (no wake) every 10min
-  - **AWAKE_IDLE**: Vehicle online but parked. Polls `/vehicle_data` every 90s to detect P→D transition
-  - **ACTIVE_TRIP**: Vehicle driving. Polls `/vehicle_data` every 30s for GPS/odometer tracking
-  - **SLEEP_PENDING**: Idle >15min without charging. Stops `/vehicle_data` calls, only checks `/vehicles` every 60s to let car sleep (prevents vampire drain)
-- Endpoint separation: `/vehicles/{id}` (state check, doesn't wake car) vs `/vehicle_data` (full payload, resets sleep timer)
-- 2-min park confirmation before ending trip (prevents false trip-ends at red lights)
-- Sleep allowance: after 15min idle, stops polling vehicle_data to allow car's ~15min sleep timer
-- Error resilience: 408/429 errors handled gracefully in ALL states (deep_sleep, sleep_pending stay put; active_trip keeps trip open; force-closes after 10min)
-- Token refresh with 60s buffer before expiry to prevent missed trip starts
-- Wake-up with retry (3 attempts) when trip needs completing and car sleeps; resets error counters on successful wake
-- Sleep-pending → awake_idle preserves idleSince to prevent infinite sleep-loop (vampire drain protection)
-- **Crash recovery**: All trip state persisted in DB (tripInProgress, tripStartTime, odometer, GPS, pollState, idleSince). On server restart, initTeslaPolling detects in-progress trips and corrects pollState to active_trip if stuck in deep_sleep/sleep_pending
-- Reverse geocoding via OpenStreetMap Nominatim
-- Geofencing for automatic business/private classification per user
-- Trips marked with autoLogged=true when created by Tesla integration
-- GPS distance fallback when odometer unavailable; noted in trip notes
-- Schema columns: pollState, idleSince, consecutiveErrors, lastApiErrorAt for state machine tracking
-
-## Teslemetry Integration (Alternative to Direct Polling)
-- Uses Teslemetry (teslemetry.com) as a broker service for Tesla Fleet Telemetry
+## Teslemetry Integration
+- Uses Teslemetry (teslemetry.com) as the sole integration for Tesla Fleet Telemetry (no direct polling)
 - Requires TESLEMETRY_API_TOKEN secret (get from Teslemetry dashboard)
 - Webhook endpoint: POST /api/teslemetry/webhook receives real-time telemetry data
 - Supports both typed key-value array and simplified object webhook formats
+- VIN extraction from body.vin, body.vehicle.vin, or body.metadata.vin
 - Trip detection logic: shift_state D/R/N = driving, P/SNA = parked, 2-min park confirmation
-- Odometer from webhook is in miles, converted to km (* 1.60934) internally
+- Odometer from webhook is in miles, converted to km (* 1.60934) in parse step
 - REST API: fetches vehicle list and vehicle_data on demand (for Refresh button)
 - Auto-creates vehicle from VIN when connecting via Teslemetry
-- Can coexist with direct Tesla API polling (both configured = Teslemetry preferred in UI)
 - Optional TESLEMETRY_WEBHOOK_SECRET for webhook endpoint auth (Bearer token validation)
+- Reverse geocoding via OpenStreetMap Nominatim
+- Geofencing for automatic business/private classification per user
+- Trips marked with autoLogged=true when created by Teslemetry
+- GPS distance fallback when odometer unavailable; noted in trip notes
 - Setup: Add TESLEMETRY_API_TOKEN → Connect via Teslemetry button → Copy webhook URL to Teslemetry dashboard
 - Vehicle must have "Allow Third-Party App Data Streaming" enabled in Settings → Safety
 
 ## Key Features
 - Multi-user authentication with username/password and Google login
 - Tesla-only vehicle management (vehicles auto-created when Tesla connects)
-- Automatic trip logging with odometer, locations, time, and purpose (Tesla API)
+- Automatic trip logging with odometer, locations, time, and purpose (via Teslemetry)
 - Business/private trip classification (manual or via geofences)
 - Monthly, custom period, and yearly overview reports
 - CSV export for tax/accounting
-- Tesla API integration for real-time trip logging (per user)
+- Teslemetry webhook integration for real-time trip logging (per user)
 - Geofencing for automatic trip categorization
 - User Profile page with account info
 - Dark/light mode

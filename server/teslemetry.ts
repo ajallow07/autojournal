@@ -159,19 +159,8 @@ function parseWebhookPayload(body: any): TelemetryData | null {
 
 async function findConnectionByVin(vin: string): Promise<TeslaConnection | null> {
   const connections = await storage.getAllActiveTeslaConnections();
-  const matches = connections.filter(c => c.vin === vin);
-  if (matches.length === 0) return null;
-  if (matches.length === 1) return matches[0];
-  matches.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
-  for (let i = 1; i < matches.length; i++) {
-    try {
-      console.log(`[Teslemetry] Deactivating duplicate connection ${matches[i].id} for VIN ${vin} (user=${matches[i].userId})`);
-      await storage.updateTeslaConnection(matches[i].id, { isActive: false });
-    } catch (err: any) {
-      console.log(`[Teslemetry] Failed to deactivate duplicate: ${err.message}`);
-    }
-  }
-  return matches[0];
+  const match = connections.find(c => c.vin === vin);
+  return match || null;
 }
 
 async function completeTripFromWebhook(
@@ -488,12 +477,6 @@ export async function setupTeslemetryConnection(userId: string): Promise<TeslaCo
       "W": 2028, "X": 2029, "Y": 2030,
     };
     if (vinYearMap[yearChar]) year = vinYearMap[yearChar];
-  }
-
-  const allConnections = await storage.getAllActiveTeslaConnections();
-  const existingOwner = allConnections.find(c => c.vin === vin && c.userId !== userId);
-  if (existingOwner) {
-    throw new Error("This vehicle is already connected to another account");
   }
 
   const userVehicles = await storage.getVehicles(userId);

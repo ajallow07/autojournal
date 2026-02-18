@@ -28,17 +28,19 @@ const navItems = [
 
 const settingsItems = [
   { title: "Vehicles", url: "/vehicle", icon: Car },
-  { title: "Tesla", url: "/tesla", icon: Zap },
   { title: "Profile", url: "/profile", icon: User },
 ];
 
 function TeslaStatusIndicator() {
+  const { user } = useAuth();
+  const ownerUser = user && (user as any).isOwner;
   const { data } = useQuery<{ connected: boolean; connection: { lastDriveState: string | null; tripInProgress: boolean } | null }>({
     queryKey: ["/api/tesla/status"],
     refetchInterval: 30000,
+    enabled: !!ownerUser,
   });
 
-  if (!data?.connected) return null;
+  if (!ownerUser || !data?.connected) return null;
 
   const conn = data.connection;
   const isDriving = conn?.tripInProgress;
@@ -131,6 +133,20 @@ export function AppSidebar() {
                   </SidebarMenuItem>
                 );
               })}
+              {(user as any)?.isOwner && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={location.startsWith("/tesla")}
+                    data-testid="nav-tesla"
+                  >
+                    <Link href="/tesla" onClick={() => setOpenMobile(false)}>
+                      <Zap className="w-4 h-4" />
+                      <span>Tesla</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

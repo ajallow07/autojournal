@@ -4,14 +4,15 @@
 Mahlis Auto Journal — a smart driver's journal application for logging and managing car trips for Tesla vehicles, based in Stockholm, Sweden. Supports multi-user authentication (Google OAuth, username/password), business/private trip classification, odometer tracking, comprehensive reports with CSV export, and Teslemetry webhook integration for automatic trip logging.
 
 ## Recent Changes
+- 2026-02-18: Owner-only Tesla features (OWNER_EMAIL env var controls access), non-owners use manual vehicle/trip entry
+- 2026-02-18: Re-enabled manual vehicle creation (POST /api/vehicles) and manual trip entry for all users
+- 2026-02-18: Tesla routes restricted server-side with isOwner check (403 for non-owners)
 - 2026-02-18: Removed direct Tesla API polling — now Teslemetry-only (deleted server/tesla.ts)
 - 2026-02-18: Removed Tesla OAuth routes (auth, callback, register, poll) — connection via Teslemetry only
 - 2026-02-18: Simplified Tesla page frontend to Teslemetry-only UI
 - 2026-02-18: Added Teslemetry webhook integration with real-time telemetry
 - 2026-02-18: New endpoints: POST /api/teslemetry/webhook (unauthenticated), POST /api/teslemetry/connect, POST /api/teslemetry/refresh
-- 2026-02-17: Removed manual vehicle addition — vehicles are only created automatically via Tesla connection
 - 2026-02-17: Multi-vehicle management with per-vehicle edit/delete; delete protection if trips exist (409)
-- 2026-02-17: Removed manual trip entry from Dashboard - trips auto-logged only via Tesla
 - 2026-02-16: Replaced Replit Auth with custom auth (username/password + Google OAuth via passport-local/passport-google-oauth20)
 - 2026-02-16: Added userId to all tables (vehicles, trips, tesla_connections, geofences) for multi-user data isolation
 - 2026-02-16: Added auth page with login/register form and Google OAuth button

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -20,6 +20,8 @@ import { MapContainer, TileLayer, Circle as LeafletCircle, Marker, useMapEvents,
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import type { Geofence, Vehicle } from "@shared/schema";
+import { useAuth } from "@/hooks/use-auth";
+import { useLocation } from "wouter";
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -692,6 +694,20 @@ function HowItWorks() {
 }
 
 export default function TeslaPage() {
+  const { user } = useAuth();
+  const [, navigate] = useLocation();
+  const isOwnerUser = (user as any)?.isOwner;
+
+  useEffect(() => {
+    if (user && !isOwnerUser) {
+      navigate("/");
+    }
+  }, [user, isOwnerUser, navigate]);
+
+  if (!isOwnerUser) {
+    return null;
+  }
+
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-6">
       <div>

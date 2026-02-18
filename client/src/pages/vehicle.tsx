@@ -14,6 +14,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { Car, Save, Gauge, Calendar, Hash, Trash2, Pencil, X, Fuel, Palette, Zap } from "lucide-react";
 import { Link } from "wouter";
 import type { Vehicle } from "@shared/schema";
+import { useAuth } from "@/hooks/use-auth";
 
 const vehicleFormSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -329,7 +330,80 @@ function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
   );
 }
 
+function AddVehicleForm({ onDone }: { onDone: () => void }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const form = useForm<VehicleFormValues>({
+    resolver: zodResolver(vehicleFormSchema),
+    defaultValues: { name: "", make: "", model: "", year: new Date().getFullYear(), licensePlate: "", vin: "", color: "", fuelType: "", currentOdometer: 0 },
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (data: VehicleFormValues) => {
+      await apiRequest("POST", "/api/vehicles", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
+      toast({ title: "Vehicle added" });
+      onDone();
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-medium flex items-center gap-2 flex-wrap">
+          <Car className="w-4 h-4" />
+          Add Vehicle
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit((d) => createMutation.mutate(d))} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <FormField control={form.control} name="name" render={({ field }) => (
+                <FormItem><FormLabel>Name</FormLabel><FormControl><Input placeholder="My Car" {...field} data-testid="input-new-vehicle-name" /></FormControl><FormMessage /></FormItem>
+              )} />
+              <FormField control={form.control} name="make" render={({ field }) => (
+                <FormItem><FormLabel>Make</FormLabel><FormControl><Input placeholder="Tesla" {...field} data-testid="input-new-vehicle-make" /></FormControl><FormMessage /></FormItem>
+              )} />
+              <FormField control={form.control} name="model" render={({ field }) => (
+                <FormItem><FormLabel>Model</FormLabel><FormControl><Input placeholder="Model Y" {...field} data-testid="input-new-vehicle-model" /></FormControl><FormMessage /></FormItem>
+              )} />
+              <FormField control={form.control} name="year" render={({ field }) => (
+                <FormItem><FormLabel>Year</FormLabel><FormControl><Input type="number" {...field} data-testid="input-new-vehicle-year" /></FormControl><FormMessage /></FormItem>
+              )} />
+              <FormField control={form.control} name="licensePlate" render={({ field }) => (
+                <FormItem><FormLabel>License Plate</FormLabel><FormControl><Input placeholder="ABC 123" {...field} data-testid="input-new-vehicle-plate" /></FormControl><FormMessage /></FormItem>
+              )} />
+              <FormField control={form.control} name="currentOdometer" render={({ field }) => (
+                <FormItem><FormLabel>Current Odometer (km)</FormLabel><FormControl><Input type="number" {...field} data-testid="input-new-vehicle-odometer" /></FormControl><FormMessage /></FormItem>
+              )} />
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button type="submit" disabled={createMutation.isPending} data-testid="button-create-vehicle">
+                <Save className="w-4 h-4 mr-2" />
+                {createMutation.isPending ? "Adding..." : "Add Vehicle"}
+              </Button>
+              <Button type="button" variant="outline" onClick={onDone} data-testid="button-cancel-new-vehicle">
+                <X className="w-4 h-4 mr-2" />
+                Cancel
+              </Button>
+            </div>
+          </form>
+        </Form>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function VehiclePage() {
+  const { user } = useAuth();
+  const isOwnerUser = (user as any)?.isOwner;
+  const [showAddForm, setShowAddForm] = useState(false);
   const { data: vehicles, isLoading } = useQuery<Vehicle[]>({
     queryKey: ["/api/vehicles"],
   });
@@ -346,10 +420,22 @@ export default function VehiclePage() {
 
   return (
     <div className="p-6 max-w-2xl mx-auto space-y-6">
-      <div className="space-y-1">
-        <h1 className="text-xl font-semibold tracking-tight" data-testid="text-vehicle-page-title">Vehicles</h1>
-        <p className="text-sm text-muted-foreground">Vehicles are added automatically when you connect your Tesla</p>
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="space-y-1">
+          <h1 className="text-xl font-semibold tracking-tight" data-testid="text-vehicle-page-title">Vehicles</h1>
+          <p className="text-sm text-muted-foreground">
+            {isOwnerUser ? "Vehicles are added automatically when you connect your Tesla" : "Manage your vehicles"}
+          </p>
+        </div>
+        {!showAddForm && (
+          <Button onClick={() => setShowAddForm(true)} data-testid="button-add-vehicle">
+            <Car className="w-4 h-4 mr-2" />
+            Add Vehicle
+          </Button>
+        )}
       </div>
+
+      {showAddForm && <AddVehicleForm onDone={() => setShowAddForm(false)} />}
 
       {vehicles && vehicles.length > 0 ? (
         <div className="space-y-3">
@@ -364,13 +450,22 @@ export default function VehiclePage() {
               <Car className="w-6 h-6 text-muted-foreground" />
             </div>
             <p className="text-sm font-medium">No vehicles yet</p>
-            <p className="text-xs text-muted-foreground mt-1 mb-4">Connect your Tesla account to automatically add your vehicle</p>
-            <Button asChild data-testid="button-go-to-tesla">
-              <Link href="/tesla">
-                <Zap className="w-4 h-4 mr-2" />
-                Connect Tesla
-              </Link>
-            </Button>
+            <p className="text-xs text-muted-foreground mt-1 mb-4">
+              {isOwnerUser ? "Connect your Tesla account to automatically add your vehicle" : "Add a vehicle to start logging trips"}
+            </p>
+            {isOwnerUser ? (
+              <Button asChild data-testid="button-go-to-tesla">
+                <Link href="/tesla">
+                  <Zap className="w-4 h-4 mr-2" />
+                  Connect Tesla
+                </Link>
+              </Button>
+            ) : (
+              <Button onClick={() => setShowAddForm(true)} data-testid="button-add-first-vehicle">
+                <Car className="w-4 h-4 mr-2" />
+                Add Vehicle
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}

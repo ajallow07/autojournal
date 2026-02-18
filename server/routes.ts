@@ -3,6 +3,12 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertVehicleSchema, insertTripSchema, insertGeofenceSchema } from "@shared/schema";
 import { setupAuth, isAuthenticated } from "./auth";
+
+const OWNER_EMAIL = process.env.OWNER_EMAIL || "";
+
+function isOwner(req: any): boolean {
+  return !!req.user?.email && req.user.email === OWNER_EMAIL;
+}
 import {
   isTeslemetryConfigured,
   handleTelemetryWebhook,
@@ -32,6 +38,14 @@ export async function registerRoutes(
     const userId = getUserId(req);
     const vehiclesList = await storage.getVehicles(userId);
     res.json(vehiclesList);
+  });
+
+  app.post("/api/vehicles", isAuthenticated, async (req, res) => {
+    const userId = getUserId(req);
+    const parsed = insertVehicleSchema.safeParse({ ...req.body, userId });
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const vehicle = await storage.createVehicle(parsed.data);
+    res.status(201).json(vehicle);
   });
 
   app.get("/api/vehicles/:id", isAuthenticated, async (req, res) => {
@@ -121,6 +135,7 @@ export async function registerRoutes(
   });
 
   app.get("/api/tesla/status", isAuthenticated, async (req, res) => {
+    if (!isOwner(req)) return res.status(403).json({ message: "Tesla features are restricted" });
     const userId = getUserId(req);
     const connection = await storage.getTeslaConnection(userId);
     const hasTeslemetry = isTeslemetryConfigured();
@@ -148,6 +163,7 @@ export async function registerRoutes(
   });
 
   app.post("/api/tesla/disconnect", isAuthenticated, async (req, res) => {
+    if (!isOwner(req)) return res.status(403).json({ message: "Tesla features are restricted" });
     const userId = getUserId(req);
     const connection = await storage.getTeslaConnection(userId);
     if (!connection) return res.status(404).json({ message: "No Tesla connection found" });
@@ -156,6 +172,7 @@ export async function registerRoutes(
   });
 
   app.post("/api/tesla/link-vehicle", isAuthenticated, async (req, res) => {
+    if (!isOwner(req)) return res.status(403).json({ message: "Tesla features are restricted" });
     const userId = getUserId(req);
     const { vehicleId } = req.body;
     if (!vehicleId) return res.status(400).json({ message: "vehicleId required" });
@@ -166,12 +183,14 @@ export async function registerRoutes(
   });
 
   app.get("/api/geofences", isAuthenticated, async (req, res) => {
+    if (!isOwner(req)) return res.status(403).json({ message: "Geofence features are restricted" });
     const userId = getUserId(req);
     const list = await storage.getGeofences(userId);
     res.json(list);
   });
 
   app.post("/api/geofences", isAuthenticated, async (req, res) => {
+    if (!isOwner(req)) return res.status(403).json({ message: "Geofence features are restricted" });
     const userId = getUserId(req);
     const parsed = insertGeofenceSchema.safeParse({ ...req.body, userId });
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
@@ -180,6 +199,7 @@ export async function registerRoutes(
   });
 
   app.patch("/api/geofences/:id", isAuthenticated, async (req, res) => {
+    if (!isOwner(req)) return res.status(403).json({ message: "Geofence features are restricted" });
     const id = req.params.id as string;
     const geofence = await storage.getGeofence(id);
     if (!geofence || geofence.userId !== getUserId(req)) return res.status(404).json({ message: "Geofence not found" });
@@ -190,6 +210,7 @@ export async function registerRoutes(
   });
 
   app.delete("/api/geofences/:id", isAuthenticated, async (req, res) => {
+    if (!isOwner(req)) return res.status(403).json({ message: "Geofence features are restricted" });
     const id = req.params.id as string;
     const geofence = await storage.getGeofence(id);
     if (!geofence || geofence.userId !== getUserId(req)) return res.status(404).json({ message: "Geofence not found" });
@@ -218,6 +239,7 @@ export async function registerRoutes(
   });
 
   app.post("/api/teslemetry/connect", isAuthenticated, async (req, res) => {
+    if (!isOwner(req)) return res.status(403).json({ message: "Tesla features are restricted" });
     try {
       const userId = getUserId(req);
       const connection = await setupTeslemetryConnection(userId);
@@ -239,6 +261,7 @@ export async function registerRoutes(
   });
 
   app.post("/api/teslemetry/refresh", isAuthenticated, async (req, res) => {
+    if (!isOwner(req)) return res.status(403).json({ message: "Tesla features are restricted" });
     try {
       const userId = getUserId(req);
       const connection = await storage.getTeslaConnection(userId);

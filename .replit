@@ -48,3 +48,4 @@ integrations = ["javascript_log_in_with_replit:2.0.0"]
 
 [userenv.shared]
 APP_DOMAIN = "autojournal.3ilights.com"
+OWNER_EMAIL = "alieu.jallow@3ilights.com"

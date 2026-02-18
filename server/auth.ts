@@ -66,9 +66,11 @@ export function getSession() {
   });
 }
 
+const OWNER_EMAIL = process.env.OWNER_EMAIL || "";
+
 function sanitizeUser(user: User) {
   const { passwordHash, ...safe } = user;
-  return safe;
+  return { ...safe, isOwner: !!user.email && user.email === OWNER_EMAIL };
 }
 
 export async function setupAuth(app: Express) {

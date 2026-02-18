@@ -11,8 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { Car, Save, Gauge, Calendar, Hash, Trash2, Pencil, X, Fuel, Palette, Zap } from "lucide-react";
-import { Link } from "wouter";
+import { Car, Save, Gauge, Calendar, Hash, Trash2, Pencil, X, Fuel, Palette } from "lucide-react";
 import type { Vehicle } from "@shared/schema";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -424,7 +423,7 @@ export default function VehiclePage() {
         <div className="space-y-1">
           <h1 className="text-xl font-semibold tracking-tight" data-testid="text-vehicle-page-title">Vehicles</h1>
           <p className="text-sm text-muted-foreground">
-            {isOwnerUser ? "Vehicles are added automatically when you connect your Tesla" : "Manage your vehicles"}
+            Manage your vehicles
           </p>
         </div>
         {!showAddForm && (
@@ -451,21 +450,12 @@ export default function VehiclePage() {
             </div>
             <p className="text-sm font-medium">No vehicles yet</p>
             <p className="text-xs text-muted-foreground mt-1 mb-4">
-              {isOwnerUser ? "Connect your Tesla account to automatically add your vehicle" : "Add a vehicle to start logging trips"}
+              Add a vehicle to start logging trips
             </p>
-            {isOwnerUser ? (
-              <Button asChild data-testid="button-go-to-tesla">
-                <Link href="/tesla">
-                  <Zap className="w-4 h-4 mr-2" />
-                  Connect Tesla
-                </Link>
-              </Button>
-            ) : (
-              <Button onClick={() => setShowAddForm(true)} data-testid="button-add-first-vehicle">
-                <Car className="w-4 h-4 mr-2" />
-                Add Vehicle
-              </Button>
-            )}
+            <Button onClick={() => setShowAddForm(true)} data-testid="button-add-first-vehicle">
+              <Car className="w-4 h-4 mr-2" />
+              Add Vehicle
+            </Button>
           </CardContent>
         </Card>
       )}

@@ -89,8 +89,10 @@ function parseWebhookPayload(body: any): TelemetryData | null {
     createdAt: body.createdAt || new Date().toISOString(),
   };
 
-  const data = body.data;
-  if (!data) return result;
+  const data = body.data || body;
+  if (!data || (typeof data === "object" && Object.keys(data).length <= 2 && data.vin)) return result;
+
+  console.log(`[Teslemetry] Raw webhook keys: ${JSON.stringify(Object.keys(body))}${body.data ? `, data keys: ${JSON.stringify(Object.keys(body.data))}` : ""}`);
 
   if (Array.isArray(data)) {
     for (const item of data) {

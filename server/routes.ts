@@ -233,7 +233,8 @@ export async function registerRoutes(
       });
     } catch (error: any) {
       console.error("[Teslemetry Connect] Error:", error.message);
-      res.status(500).json({ message: error.message });
+      const status = error.message?.includes("already connected") ? 409 : 500;
+      res.status(status).json({ message: error.message });
     }
   });
 

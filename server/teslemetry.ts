@@ -159,8 +159,19 @@ function parseWebhookPayload(body: any): TelemetryData | null {
 
 async function findConnectionByVin(vin: string): Promise<TeslaConnection | null> {
   const connections = await storage.getAllActiveTeslaConnections();
-  const match = connections.find(c => c.vin === vin);
-  return match || null;
+  const matches = connections.filter(c => c.vin === vin);
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return matches[0];
+  matches.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+  for (let i = 1; i < matches.length; i++) {
+    try {
+      console.log(`[Teslemetry] Deactivating duplicate connection ${matches[i].id} for VIN ${vin} (user=${matches[i].userId})`);
+      await storage.updateTeslaConnection(matches[i].id, { isActive: false });
+    } catch (err: any) {
+      console.log(`[Teslemetry] Failed to deactivate duplicate: ${err.message}`);
+    }
+  }
+  return matches[0];
 }
 
 async function completeTripFromWebhook(
@@ -467,24 +478,46 @@ export async function setupTeslemetryConnection(userId: string): Promise<TeslaCo
     else if (modelChar === "3" || modelChar === "W") model = "Model 3";
   }
 
+  let year = new Date().getFullYear();
+  if (vin && vin.length >= 10) {
+    const yearChar = vin[9];
+    const vinYearMap: Record<string, number> = {
+      "A": 2010, "B": 2011, "C": 2012, "D": 2013, "E": 2014, "F": 2015,
+      "G": 2016, "H": 2017, "J": 2018, "K": 2019, "L": 2020, "M": 2021,
+      "N": 2022, "P": 2023, "R": 2024, "S": 2025, "T": 2026, "V": 2027,
+      "W": 2028, "X": 2029, "Y": 2030,
+    };
+    if (vinYearMap[yearChar]) year = vinYearMap[yearChar];
+  }
+
+  const allConnections = await storage.getAllActiveTeslaConnections();
+  const existingOwner = allConnections.find(c => c.vin === vin && c.userId !== userId);
+  if (existingOwner) {
+    throw new Error("This vehicle is already connected to another account");
+  }
+
   const userVehicles = await storage.getVehicles(userId);
   let linkedVehicle = userVehicles.find((v) => v.vin === vin) || userVehicles.find((v) => v.isDefault) || userVehicles[0];
 
   if (!linkedVehicle) {
-    const currentYear = new Date().getFullYear();
     linkedVehicle = await storage.createVehicle({
       userId,
       name: displayName,
       make,
       model,
-      year: currentYear,
+      year,
       licensePlate: "",
       vin,
       currentOdometer: 0,
       isDefault: true,
     });
-  } else if (!linkedVehicle.vin) {
-    await storage.updateVehicle(linkedVehicle.id, { vin });
+  } else {
+    const updates: Record<string, any> = {};
+    if (!linkedVehicle.vin) updates.vin = vin;
+    if (linkedVehicle.year !== year) updates.year = year;
+    if (Object.keys(updates).length > 0) {
+      await storage.updateVehicle(linkedVehicle.id, updates);
+    }
   }
 
   const existing = await storage.getTeslaConnection(userId);

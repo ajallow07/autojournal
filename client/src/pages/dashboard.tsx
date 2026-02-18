@@ -178,11 +178,11 @@ export default function Dashboard() {
               </div>
               <p className="text-sm font-medium">No trips logged yet</p>
               <p className="text-xs text-muted-foreground mt-1 max-w-xs">
-                Connect your Tesla to start automatic trip logging, or add trips manually
+                Start logging your trips to track mileage and generate reports
               </p>
-              <Link href="/tesla">
-                <Button variant="outline" size="sm" className="mt-4" data-testid="link-connect-tesla-empty">
-                  Connect Tesla
+              <Link href="/trips/new">
+                <Button variant="outline" size="sm" className="mt-4" data-testid="link-add-trip-empty">
+                  Add Trip
                 </Button>
               </Link>
             </div>

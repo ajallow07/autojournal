@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   Zap, ZapOff, MapPin, Trash2, Plus, Radio, Car, Shield, Navigation, Circle,
-  RefreshCw, Link2, Unlink, Search,
+  RefreshCw, Link2, Unlink, Search, Webhook, Copy, Check,
 } from "lucide-react";
 import { MapContainer, TileLayer, Circle as LeafletCircle, Marker, useMapEvents, useMap } from "react-leaflet";
 import L from "leaflet";
@@ -41,10 +41,14 @@ type GeofenceFormValues = z.infer<typeof geofenceFormSchema>;
 function TeslaConnectionCard() {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const [copied, setCopied] = useState(false);
 
   const { data: status, isLoading } = useQuery<{
     configured: boolean;
     connected: boolean;
+    teslemetryConfigured: boolean;
+    directApiConfigured: boolean;
+    webhookUrl: string | null;
     connection: {
       id: string;
       vin: string;
@@ -75,11 +79,22 @@ function TeslaConnectionCard() {
       }
     },
     onError: (error: Error) => {
-      toast({
-        title: "Connection failed",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Connection failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const teslemetryConnectMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/teslemetry/connect");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["/api/tesla/status"] });
+      qc.invalidateQueries({ queryKey: ["/api/vehicles"] });
+      toast({ title: "Connected via Teslemetry", description: `Vehicle: ${data.connection?.vehicleName}` });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Connection failed", description: error.message, variant: "destructive" });
     },
   });
 
@@ -93,23 +108,26 @@ function TeslaConnectionCard() {
     },
   });
 
-  const pollMutation = useMutation({
+  const refreshMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/tesla/poll");
+      const endpoint = status?.teslemetryConfigured ? "/api/teslemetry/refresh" : "/api/tesla/poll";
+      const res = await apiRequest("POST", endpoint);
       return res.json();
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["/api/tesla/status"] });
       qc.invalidateQueries({ queryKey: ["/api/trips"] });
       toast({
-        title: "Poll complete",
+        title: "Data refreshed",
         description: data.tripAction
           ? `Trip ${data.tripAction}`
-          : `State: ${data.driveState || data.status}`,
+          : data.odometer
+            ? `Odometer: ${Math.round(data.odometer)} km`
+            : `State: ${data.driveState || data.status || "updated"}`,
       });
     },
     onError: (error: Error) => {
-      toast({ title: "Poll failed", description: error.message, variant: "destructive" });
+      toast({ title: "Refresh failed", description: error.message, variant: "destructive" });
     },
   });
 
@@ -136,6 +154,15 @@ function TeslaConnectionCard() {
     },
   });
 
+  const copyWebhookUrl = useCallback(() => {
+    if (status?.webhookUrl) {
+      navigator.clipboard.writeText(status.webhookUrl);
+      setCopied(true);
+      toast({ title: "Webhook URL copied" });
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }, [status?.webhookUrl, toast]);
+
   if (isLoading) {
     return (
       <Card>
@@ -155,20 +182,26 @@ function TeslaConnectionCard() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 flex-wrap">
             <Shield className="w-5 h-5" />
-            Tesla API Setup Required
+            Tesla Connection Setup
           </CardTitle>
           <CardDescription>
-            To connect your Tesla, you need to register as a developer at developer.tesla.com and add your credentials.
+            Connect your Tesla to enable automatic trip logging. Choose one of the methods below.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-3 text-sm text-muted-foreground">
-            <p className="font-medium text-foreground">Setup steps:</p>
+            <p className="font-medium text-foreground">Option A: Teslemetry (recommended)</p>
             <ol className="list-decimal list-inside space-y-2">
-              <li>Go to <span className="font-medium text-foreground">developer.tesla.com</span> and register your application</li>
-              <li>Generate an EC keypair and host the public key on your domain</li>
-              <li>Copy your <span className="font-medium text-foreground">Client ID</span> and <span className="font-medium text-foreground">Client Secret</span></li>
-              <li>Add them as secrets named <span className="font-mono text-foreground">TESLA_CLIENT_ID</span> and <span className="font-mono text-foreground">TESLA_CLIENT_SECRET</span></li>
+              <li>Sign up at <span className="font-medium text-foreground">teslemetry.com</span></li>
+              <li>Get your API access token from the dashboard</li>
+              <li>Add it as a secret named <span className="font-mono text-foreground">TESLEMETRY_API_TOKEN</span></li>
+            </ol>
+          </div>
+          <div className="space-y-3 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">Option B: Direct Tesla API</p>
+            <ol className="list-decimal list-inside space-y-2">
+              <li>Register at <span className="font-medium text-foreground">developer.tesla.com</span></li>
+              <li>Add <span className="font-mono text-foreground">TESLA_CLIENT_ID</span> and <span className="font-mono text-foreground">TESLA_CLIENT_SECRET</span> as secrets</li>
             </ol>
           </div>
           <div className="flex items-center gap-2 p-3 rounded-md bg-muted">
@@ -205,33 +238,51 @@ function TeslaConnectionCard() {
             </ul>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <Button
-              onClick={() => connectMutation.mutate()}
-              disabled={connectMutation.isPending}
-              data-testid="button-connect-tesla"
-            >
-              <Zap className="w-4 h-4 mr-2" />
-              {connectMutation.isPending ? "Redirecting..." : "Connect Tesla Account"}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => registerMutation.mutate()}
-              disabled={registerMutation.isPending}
-              data-testid="button-register-tesla"
-            >
-              <Shield className="w-4 h-4 mr-2" />
-              {registerMutation.isPending ? "Registering..." : "Register Partner Account"}
-            </Button>
+            {status.teslemetryConfigured && (
+              <Button
+                onClick={() => teslemetryConnectMutation.mutate()}
+                disabled={teslemetryConnectMutation.isPending}
+                data-testid="button-connect-teslemetry"
+              >
+                <Webhook className="w-4 h-4 mr-2" />
+                {teslemetryConnectMutation.isPending ? "Connecting..." : "Connect via Teslemetry"}
+              </Button>
+            )}
+            {status.directApiConfigured && (
+              <Button
+                variant={status.teslemetryConfigured ? "outline" : "default"}
+                onClick={() => connectMutation.mutate()}
+                disabled={connectMutation.isPending}
+                data-testid="button-connect-tesla"
+              >
+                <Zap className="w-4 h-4 mr-2" />
+                {connectMutation.isPending ? "Redirecting..." : "Connect via Tesla API"}
+              </Button>
+            )}
+            {status.directApiConfigured && (
+              <Button
+                variant="outline"
+                onClick={() => registerMutation.mutate()}
+                disabled={registerMutation.isPending}
+                data-testid="button-register-tesla"
+              >
+                <Shield className="w-4 h-4 mr-2" />
+                {registerMutation.isPending ? "Registering..." : "Register Partner"}
+              </Button>
+            )}
           </div>
-          <p className="text-xs text-muted-foreground">
-            If you get a region error, click "Register Partner Account" first, then try connecting again.
-          </p>
+          {status.teslemetryConfigured && (
+            <p className="text-xs text-muted-foreground">
+              Teslemetry provides real-time webhook data with reliable odometer readings. No polling required.
+            </p>
+          )}
         </CardContent>
       </Card>
     );
   }
 
   const conn = status.connection!;
+  const isTeslemetry = status.teslemetryConfigured;
 
   return (
     <Card>
@@ -241,13 +292,23 @@ function TeslaConnectionCard() {
             <Zap className="w-5 h-5 text-green-500" />
             Tesla Connected
           </CardTitle>
-          <Badge variant="outline" data-testid="badge-connection-status">
-            <Circle className="w-2 h-2 mr-1 fill-green-500 text-green-500" />
-            Active
-          </Badge>
+          <div className="flex items-center gap-2 flex-wrap">
+            {isTeslemetry && (
+              <Badge variant="secondary" data-testid="badge-teslemetry-mode">
+                <Webhook className="w-3 h-3 mr-1" />
+                Teslemetry
+              </Badge>
+            )}
+            <Badge variant="outline" data-testid="badge-connection-status">
+              <Circle className="w-2 h-2 mr-1 fill-green-500 text-green-500" />
+              Active
+            </Badge>
+          </div>
         </div>
         <CardDescription>
-          Your Tesla is linked. Trips are being logged automatically.
+          {isTeslemetry
+            ? "Your Tesla is linked via Teslemetry. Real-time webhooks will log trips automatically."
+            : "Your Tesla is linked. Trips are being logged automatically."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -263,10 +324,10 @@ function TeslaConnectionCard() {
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">Vehicle State</p>
             <p className="text-sm font-medium capitalize" data-testid="text-drive-state">
-              {conn.lastDriveState === "asleep" ? "Sleeping (polling every 2 min)" :
-               conn.lastDriveState === "driving" ? "Driving (polling every 15s)" :
-               conn.lastDriveState === "parked" ? "Parked (polling every 30s)" :
-               conn.lastDriveState || "Unknown"}
+              {conn.lastDriveState === "asleep" ? "Sleeping" :
+               conn.lastDriveState === "driving" ? "Driving" :
+               conn.lastDriveState === "parked" ? "Parked" :
+               conn.lastDriveState || "Waiting for data"}
             </p>
           </div>
           <div className="space-y-1">
@@ -291,6 +352,25 @@ function TeslaConnectionCard() {
           )}
         </div>
 
+        {isTeslemetry && status.webhookUrl && (
+          <div className="space-y-2 pt-2 border-t">
+            <p className="text-xs text-muted-foreground">Webhook URL (add this in your Teslemetry dashboard)</p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-xs bg-muted p-2 rounded-md font-mono break-all" data-testid="text-webhook-url">
+                {status.webhookUrl}
+              </code>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={copyWebhookUrl}
+                data-testid="button-copy-webhook-url"
+              >
+                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              </Button>
+            </div>
+          </div>
+        )}
+
         {vehicles && vehicles.length > 0 && (
           <div className="space-y-2 pt-2 border-t">
             <p className="text-xs text-muted-foreground">Linked to journal vehicle</p>
@@ -305,7 +385,7 @@ function TeslaConnectionCard() {
                 <SelectContent>
                   {vehicles.map((v) => (
                     <SelectItem key={v.id} value={v.id}>
-                      {v.name} ({v.licensePlate})
+                      {v.name} ({v.licensePlate || v.vin || "No plate"})
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -317,12 +397,12 @@ function TeslaConnectionCard() {
         <div className="flex items-center gap-2 flex-wrap pt-2 border-t">
           <Button
             variant="outline"
-            onClick={() => pollMutation.mutate()}
-            disabled={pollMutation.isPending}
-            data-testid="button-poll-now"
+            onClick={() => refreshMutation.mutate()}
+            disabled={refreshMutation.isPending}
+            data-testid="button-refresh-data"
           >
-            <RefreshCw className={`w-4 h-4 mr-2 ${pollMutation.isPending ? "animate-spin" : ""}`} />
-            Poll Now
+            <RefreshCw className={`w-4 h-4 mr-2 ${refreshMutation.isPending ? "animate-spin" : ""}`} />
+            {isTeslemetry ? "Refresh Data" : "Poll Now"}
           </Button>
           <Button
             variant="destructive"
@@ -337,9 +417,13 @@ function TeslaConnectionCard() {
 
         <div className="text-xs text-muted-foreground space-y-0.5">
           {conn.lastPolledAt && (
-            <p>Last polled: {new Date(conn.lastPolledAt).toLocaleString("sv-SE")}</p>
+            <p>Last updated: {new Date(conn.lastPolledAt).toLocaleString("sv-SE")}</p>
           )}
-          <p>Adaptive polling: every 15s while driving, 30s when parked, 2 min when sleeping. Trips are logged automatically based on drive state and geofences.</p>
+          {isTeslemetry ? (
+            <p>Real-time data via Teslemetry webhooks. Configure the webhook URL above in your Teslemetry dashboard to receive automatic trip updates.</p>
+          ) : (
+            <p>Adaptive polling: faster while driving, slower when parked. Trips are logged automatically based on drive state and geofences.</p>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -653,7 +737,7 @@ function HowItWorks() {
             </div>
             <p className="text-sm font-medium">1. Connect</p>
             <p className="text-xs text-muted-foreground">
-              Log in with your Tesla account to grant access to vehicle data. No hardware needed.
+              Connect via Teslemetry or Tesla API to grant access to vehicle data. No hardware needed.
             </p>
           </div>
           <div className="space-y-2">
@@ -662,7 +746,7 @@ function HowItWorks() {
             </div>
             <p className="text-sm font-medium">2. Drive</p>
             <p className="text-xs text-muted-foreground">
-              Every trip is automatically detected via the Tesla API. Start driving and the app handles the rest.
+              Every trip is automatically detected via real-time telemetry. Start driving and the app handles the rest.
             </p>
           </div>
           <div className="space-y-2">

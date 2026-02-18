@@ -13,6 +13,13 @@ import {
   initTeslaPolling,
   registerPartnerAccount,
 } from "./tesla";
+import {
+  isTeslemetryConfigured,
+  handleTelemetryWebhook,
+  setupTeslemetryConnection,
+  fetchTeslemetryVehicleData,
+  getWebhookUrl,
+} from "./teslemetry";
 import crypto from "crypto";
 
 let pendingOAuthStates: Map<string, string> = new Map();
@@ -41,24 +48,27 @@ export async function registerRoutes(
   });
 
   app.get("/api/vehicles/:id", isAuthenticated, async (req, res) => {
-    const vehicle = await storage.getVehicle(req.params.id);
+    const id = req.params.id as string;
+    const vehicle = await storage.getVehicle(id);
     if (!vehicle || vehicle.userId !== getUserId(req)) return res.status(404).json({ message: "Vehicle not found" });
     res.json(vehicle);
   });
 
   app.patch("/api/vehicles/:id", isAuthenticated, async (req, res) => {
-    const vehicle = await storage.getVehicle(req.params.id);
+    const id = req.params.id as string;
+    const vehicle = await storage.getVehicle(id);
     if (!vehicle || vehicle.userId !== getUserId(req)) return res.status(404).json({ message: "Vehicle not found" });
     const parsed = patchVehicleSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
-    const updated = await storage.updateVehicle(req.params.id, parsed.data);
+    const updated = await storage.updateVehicle(id, parsed.data);
     res.json(updated);
   });
 
   app.delete("/api/vehicles/:id", isAuthenticated, async (req, res) => {
-    const vehicle = await storage.getVehicle(req.params.id);
+    const id = req.params.id as string;
+    const vehicle = await storage.getVehicle(id);
     if (!vehicle || vehicle.userId !== getUserId(req)) return res.status(404).json({ message: "Vehicle not found" });
-    const tripCount = await storage.getTripsCountByVehicle(req.params.id);
+    const tripCount = await storage.getTripsCountByVehicle(id);
     if (tripCount > 0) {
       return res.status(409).json({
         message: `Cannot delete vehicle with ${tripCount} existing trip${tripCount > 1 ? "s" : ""}. Remove all trips for this vehicle first.`,
@@ -66,10 +76,10 @@ export async function registerRoutes(
       });
     }
     const connection = await storage.getTeslaConnection(getUserId(req));
-    if (connection?.vehicleId === req.params.id) {
+    if (connection?.vehicleId === id) {
       await storage.updateTeslaConnection(connection.id, { vehicleId: null });
     }
-    await storage.deleteVehicle(req.params.id);
+    await storage.deleteVehicle(id);
     res.json({ success: true });
   });
 
@@ -80,7 +90,8 @@ export async function registerRoutes(
   });
 
   app.get("/api/trips/:id", isAuthenticated, async (req, res) => {
-    const trip = await storage.getTrip(req.params.id);
+    const id = req.params.id as string;
+    const trip = await storage.getTrip(id);
     if (!trip || trip.userId !== getUserId(req)) return res.status(404).json({ message: "Trip not found" });
     res.json(trip);
   });
@@ -98,7 +109,8 @@ export async function registerRoutes(
   });
 
   app.patch("/api/trips/:id", isAuthenticated, async (req, res) => {
-    const trip = await storage.getTrip(req.params.id);
+    const id = req.params.id as string;
+    const trip = await storage.getTrip(id);
     if (!trip || trip.userId !== getUserId(req)) return res.status(404).json({ message: "Trip not found" });
     const parsed = patchTripSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
@@ -108,14 +120,15 @@ export async function registerRoutes(
       }
       parsed.data.distance = parsed.data.endOdometer - parsed.data.startOdometer;
     }
-    const updated = await storage.updateTrip(req.params.id, parsed.data);
+    const updated = await storage.updateTrip(id, parsed.data);
     res.json(updated);
   });
 
   app.delete("/api/trips/:id", isAuthenticated, async (req, res) => {
-    const trip = await storage.getTrip(req.params.id);
+    const id = req.params.id as string;
+    const trip = await storage.getTrip(id);
     if (!trip || trip.userId !== getUserId(req)) return res.status(404).json({ message: "Trip not found" });
-    const deleted = await storage.deleteTrip(req.params.id);
+    const deleted = await storage.deleteTrip(id);
     if (!deleted) return res.status(404).json({ message: "Trip not found" });
     res.json({ success: true });
   });
@@ -123,10 +136,14 @@ export async function registerRoutes(
   app.get("/api/tesla/status", isAuthenticated, async (req, res) => {
     const userId = getUserId(req);
     const connection = await storage.getTeslaConnection(userId);
-    const hasCredentials = !!(process.env.TESLA_CLIENT_ID && process.env.TESLA_CLIENT_SECRET);
+    const hasDirectCredentials = !!(process.env.TESLA_CLIENT_ID && process.env.TESLA_CLIENT_SECRET);
+    const hasTeslemetry = isTeslemetryConfigured();
     res.json({
-      configured: hasCredentials,
+      configured: hasDirectCredentials || hasTeslemetry,
       connected: !!connection?.isActive,
+      teslemetryConfigured: hasTeslemetry,
+      directApiConfigured: hasDirectCredentials,
+      webhookUrl: hasTeslemetry ? getWebhookUrl() : null,
       connection: connection ? {
         id: connection.id,
         vin: connection.vin,
@@ -292,20 +309,94 @@ export async function registerRoutes(
   });
 
   app.patch("/api/geofences/:id", isAuthenticated, async (req, res) => {
-    const geofence = await storage.getGeofence(req.params.id);
+    const id = req.params.id as string;
+    const geofence = await storage.getGeofence(id);
     if (!geofence || geofence.userId !== getUserId(req)) return res.status(404).json({ message: "Geofence not found" });
     const parsed = patchGeofenceSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
-    const updated = await storage.updateGeofence(req.params.id, parsed.data);
+    const updated = await storage.updateGeofence(id, parsed.data);
     res.json(updated);
   });
 
   app.delete("/api/geofences/:id", isAuthenticated, async (req, res) => {
-    const geofence = await storage.getGeofence(req.params.id);
+    const id = req.params.id as string;
+    const geofence = await storage.getGeofence(id);
     if (!geofence || geofence.userId !== getUserId(req)) return res.status(404).json({ message: "Geofence not found" });
-    const deleted = await storage.deleteGeofence(req.params.id);
+    const deleted = await storage.deleteGeofence(id);
     if (!deleted) return res.status(404).json({ message: "Geofence not found" });
     res.json({ success: true });
+  });
+
+  app.post("/api/teslemetry/webhook", async (req, res) => {
+    const webhookSecret = process.env.TESLEMETRY_WEBHOOK_SECRET;
+    if (webhookSecret) {
+      const authHeader = req.headers.authorization;
+      const providedToken = authHeader?.replace(/^Bearer\s+/i, "");
+      if (!providedToken || providedToken !== webhookSecret) {
+        console.log("[Teslemetry] Webhook auth failed - invalid or missing token");
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+    }
+    try {
+      const result = await handleTelemetryWebhook(req.body);
+      res.json(result);
+    } catch (error: any) {
+      console.error("[Teslemetry Webhook] Error:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/teslemetry/connect", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const connection = await setupTeslemetryConnection(userId);
+      res.json({
+        success: true,
+        connection: {
+          id: connection.id,
+          vin: connection.vin,
+          vehicleName: connection.vehicleName,
+          vehicleId: connection.vehicleId,
+        },
+        webhookUrl: getWebhookUrl(),
+      });
+    } catch (error: any) {
+      console.error("[Teslemetry Connect] Error:", error.message);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/teslemetry/refresh", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const connection = await storage.getTeslaConnection(userId);
+      if (!connection?.vin) {
+        return res.status(404).json({ message: "No Tesla connection found" });
+      }
+      const vehicleData = await fetchTeslemetryVehicleData(connection.vin);
+      const driveState = vehicleData?.drive_state;
+      const vehicleState = vehicleData?.vehicle_state;
+      const rawOdometer = vehicleState?.odometer;
+      const odometerKm = rawOdometer != null && rawOdometer > 0 ? rawOdometer * 1.60934 : null;
+      await storage.updateTeslaConnection(connection.id, {
+        lastPolledAt: new Date(),
+        lastDriveState: driveState?.shift_state === "D" ? "driving" : "parked",
+        lastShiftState: driveState?.shift_state || null,
+        lastLatitude: driveState?.latitude ?? null,
+        lastLongitude: driveState?.longitude ?? null,
+        lastOdometer: odometerKm,
+      });
+      res.json({
+        success: true,
+        odometer: odometerKm,
+        latitude: driveState?.latitude,
+        longitude: driveState?.longitude,
+        shiftState: driveState?.shift_state,
+      });
+    } catch (error: any) {
+      console.error("[Teslemetry Refresh] Error:", error.message);
+      res.status(500).json({ message: error.message });
+    }
   });
 
   await initTeslaPolling();

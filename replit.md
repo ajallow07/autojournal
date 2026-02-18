@@ -4,6 +4,11 @@
 Mahlis Auto Journal — a smart driver's journal application for logging and managing car trips for Tesla vehicles, based in Stockholm, Sweden. Supports multi-user authentication (Google OAuth, username/password), business/private trip classification, odometer tracking, comprehensive reports with CSV export, and Tesla API integration for automatic trip logging.
 
 ## Recent Changes
+- 2026-02-18: Added Teslemetry webhook integration as alternative to direct Tesla API polling
+- 2026-02-18: New endpoints: POST /api/teslemetry/webhook (unauthenticated), POST /api/teslemetry/connect, POST /api/teslemetry/refresh
+- 2026-02-18: New server/teslemetry.ts module for webhook processing, trip detection, and Teslemetry REST API
+- 2026-02-18: Tesla page UI updated to show Teslemetry connection option, webhook URL, and copy button
+- 2026-02-18: Fixed all LSP errors in routes.ts (req.params type casting)
 - 2026-02-17: Removed manual vehicle addition — vehicles are only created automatically via Tesla connection
 - 2026-02-17: Removed Biluppgifter vehicle lookup endpoint (no longer needed with Tesla-only vehicles)
 - 2026-02-17: Refactored Tesla polling to "perfect" journal strategy: trigger poll checks shift_state, P→D starts trip with odometer, 2-min park confirmation before ending trip, GPS backup for route
@@ -50,12 +55,13 @@ client/src/
     tesla.tsx       - Tesla connection, geofence management
 
 server/
-  auth.ts     - Custom auth module (passport-local, passport-google-oauth20, bcrypt, sessions)
-  db.ts       - Shared database connection (drizzle + pg pool)
-  routes.ts   - API endpoints with auth middleware
-  storage.ts  - Database storage layer with userId filtering
-  tesla.ts    - Tesla API service (multi-user polling, trip detection)
-  seed.ts     - Database seeding (minimal)
+  auth.ts        - Custom auth module (passport-local, passport-google-oauth20, bcrypt, sessions)
+  db.ts          - Shared database connection (drizzle + pg pool)
+  routes.ts      - API endpoints with auth middleware
+  storage.ts     - Database storage layer with userId filtering
+  tesla.ts       - Tesla API service (multi-user polling, trip detection)
+  teslemetry.ts  - Teslemetry webhook handler and REST API client
+  seed.ts        - Database seeding (minimal)
 
 shared/
   schema.ts       - Drizzle schema (all tables include userId column)
@@ -72,11 +78,14 @@ shared/
 - Sessions stored in PostgreSQL (sessions table) with 1-week TTL
 - Required secrets: SESSION_SECRET (set), GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (optional, for Google login)
 
-## API Endpoints (all require authentication)
+## API Endpoints (all require authentication unless noted)
 - GET /api/vehicles, GET/PATCH/DELETE /api/vehicles/:id
 - GET/POST /api/trips, GET/PATCH/DELETE /api/trips/:id
 - GET /api/tesla/status, GET /api/tesla/auth, GET /api/tesla/callback
 - POST /api/tesla/disconnect, POST /api/tesla/poll, POST /api/tesla/link-vehicle
+- POST /api/teslemetry/webhook (**unauthenticated** - receives Teslemetry telemetry data)
+- POST /api/teslemetry/connect (connects via Teslemetry API, creates vehicle + connection)
+- POST /api/teslemetry/refresh (fetches latest vehicle_data from Teslemetry API)
 - GET/POST /api/geofences, PATCH/DELETE /api/geofences/:id
 - POST /api/auth/register, POST /api/auth/login, POST /api/auth/logout
 - GET /api/auth/user, GET /api/auth/google, GET /api/auth/google/callback
@@ -102,6 +111,20 @@ shared/
 - Trips marked with autoLogged=true when created by Tesla integration
 - GPS distance fallback when odometer unavailable; noted in trip notes
 - Schema columns: pollState, idleSince, consecutiveErrors, lastApiErrorAt for state machine tracking
+
+## Teslemetry Integration (Alternative to Direct Polling)
+- Uses Teslemetry (teslemetry.com) as a broker service for Tesla Fleet Telemetry
+- Requires TESLEMETRY_API_TOKEN secret (get from Teslemetry dashboard)
+- Webhook endpoint: POST /api/teslemetry/webhook receives real-time telemetry data
+- Supports both typed key-value array and simplified object webhook formats
+- Trip detection logic: shift_state D/R/N = driving, P/SNA = parked, 2-min park confirmation
+- Odometer from webhook is in miles, converted to km (* 1.60934) internally
+- REST API: fetches vehicle list and vehicle_data on demand (for Refresh button)
+- Auto-creates vehicle from VIN when connecting via Teslemetry
+- Can coexist with direct Tesla API polling (both configured = Teslemetry preferred in UI)
+- Optional TESLEMETRY_WEBHOOK_SECRET for webhook endpoint auth (Bearer token validation)
+- Setup: Add TESLEMETRY_API_TOKEN → Connect via Teslemetry button → Copy webhook URL to Teslemetry dashboard
+- Vehicle must have "Allow Third-Party App Data Streaming" enabled in Settings → Safety
 
 ## Key Features
 - Multi-user authentication with username/password and Google login

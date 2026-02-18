@@ -67,6 +67,21 @@ app.use((req, res, next) => {
     console.error("Seed error:", e);
   }
 
+  if (process.env.CLEANUP_PRODUCTION === "true") {
+    try {
+      const { pool } = await import("./db");
+      await pool.query("DELETE FROM trips");
+      await pool.query("DELETE FROM geofences");
+      await pool.query("DELETE FROM tesla_connections");
+      await pool.query("DELETE FROM sessions");
+      await pool.query("DELETE FROM vehicles");
+      await pool.query("DELETE FROM users");
+      console.log("Production cleanup complete — all data deleted");
+    } catch (e) {
+      console.error("Production cleanup error:", e);
+    }
+  }
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {

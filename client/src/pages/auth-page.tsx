@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Car, AlertCircle, Zap, MapPin, BarChart3, Shield } from "lucide-react";
+import { Car, AlertCircle, MapPin, BarChart3, Shield, BookOpen } from "lucide-react";
 import { SiGoogle } from "react-icons/si";
 
 export default function AuthPage() {
@@ -60,14 +60,14 @@ export default function AuthPage() {
 
   const features = [
     {
-      icon: Zap,
-      title: "Tesla Integration",
-      desc: "Automatic trip logging via Tesla API",
+      icon: BookOpen,
+      title: "Easy Trip Logging",
+      desc: "Log business and private trips effortlessly",
     },
     {
       icon: MapPin,
-      title: "Smart Geofencing",
-      desc: "Auto-classify business and private trips",
+      title: "Mileage Tracking",
+      desc: "Track odometer readings and distances",
     },
     {
       icon: BarChart3,
@@ -97,8 +97,8 @@ export default function AuthPage() {
             Your Digital<br />Driver's Journal
           </h2>
           <p className="text-base text-white/70 mb-10 max-w-md leading-relaxed">
-            Effortlessly track every trip for your Tesla. Automatic logging,
-            geofencing, and tax-ready reports — built for Swedish drivers.
+            Effortlessly track every trip with smart mileage logging
+            and tax-ready reports — built for Swedish drivers.
           </p>
 
           <div className="grid grid-cols-2 gap-4">

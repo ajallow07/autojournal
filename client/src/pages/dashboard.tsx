@@ -122,7 +122,7 @@ export default function Dashboard() {
         <StatCard
           title="Odometer"
           value={vehicle ? `${vehicle.currentOdometer.toLocaleString("sv-SE", { maximumFractionDigits: 0 })} km` : "N/A"}
-          subtitle={vehicle?.licensePlate || "No vehicle"}
+          subtitle={vehicle?.licensePlate || vehicle?.name || "No vehicle"}
           icon={Calendar}
           iconBg="bg-chart-4"
         />

@@ -439,9 +439,14 @@ async function pollAwakeIdle(connection: TeslaConnection, token: string): Promis
   const odometer = rawOdometer != null && rawOdometer > 0 ? rawOdometer * 1.60934 : null;
   const isCharging = chargeState?.charging_state === "Charging";
 
+  if (rawOdometer == null) {
+    console.log(`[Tesla Debug] vehicle_state keys: ${vehicleState ? Object.keys(vehicleState).join(", ") : "NULL"}`);
+    console.log(`[Tesla Debug] Top-level response keys: ${Object.keys(vehicleData).join(", ")}`);
+  }
+
   const isDriving = shiftState === "D" || shiftState === "R" || shiftState === "N";
 
-  console.log(`[Tesla Poll] AWAKE_IDLE user=${connection.userId} shift=${shiftState || "null"} charging=${isCharging} lat=${lat} lon=${lon}`);
+  console.log(`[Tesla Poll] AWAKE_IDLE user=${connection.userId} shift=${shiftState || "null"} charging=${isCharging} lat=${lat} lon=${lon} rawOdo=${rawOdometer}`);
 
   if (isDriving) {
     const locationName = lat && lon ? await reverseGeocode(lat, lon) : "Unknown";
@@ -578,10 +583,14 @@ async function pollActiveTrip(connection: TeslaConnection, token: string): Promi
   const rawOdometer = vehicleState?.odometer;
   const odometer = rawOdometer != null && rawOdometer > 0 ? rawOdometer * 1.60934 : null;
 
+  if (rawOdometer == null) {
+    console.log(`[Tesla Debug] ACTIVE_TRIP vehicle_state keys: ${vehicleState ? Object.keys(vehicleState).join(", ") : "NULL"}`);
+  }
+
   const isDriving = shiftState === "D" || shiftState === "R" || shiftState === "N";
   const isParked = shiftState === "P" || (!shiftState && !isDriving);
 
-  console.log(`[Tesla Poll] ACTIVE_TRIP user=${connection.userId} shift=${shiftState || "null"} lat=${lat} lon=${lon} odo_km=${odometer?.toFixed(1)}`);
+  console.log(`[Tesla Poll] ACTIVE_TRIP user=${connection.userId} shift=${shiftState || "null"} lat=${lat} lon=${lon} odo_km=${odometer?.toFixed(1)} rawOdo=${rawOdometer}`);
 
   if (isDriving) {
     await storage.updateTeslaConnection(connection.id, {

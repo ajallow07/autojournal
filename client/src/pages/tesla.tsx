@@ -376,12 +376,35 @@ function FlyToLocation({ lat, lng }: { lat: number; lng: number }) {
   return null;
 }
 
+function SetInitialView({ lat, lng }: { lat: number; lng: number }) {
+  const map = useMap();
+  const hasSetRef = useRef(false);
+  useEffect(() => {
+    if (!hasSetRef.current) {
+      map.setView([lat, lng], 13);
+      hasSetRef.current = true;
+    }
+  }, [lat, lng, map]);
+  return null;
+}
+
 function GeofenceManager() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [flyTo, setFlyTo] = useState<{ lat: number; lng: number } | null>(null);
+
+  const { data: teslaStatus } = useQuery<{
+    connection: {
+      lastLatitude: number | null;
+      lastLongitude: number | null;
+    } | null;
+  }>({ queryKey: ["/api/tesla/status"] });
+
+  const carLat = teslaStatus?.connection?.lastLatitude;
+  const carLon = teslaStatus?.connection?.lastLongitude;
+  const defaultCenter: [number, number] = carLat && carLon ? [carLat, carLon] : [59.3293, 18.0686];
 
   const { data: geofences, isLoading } = useQuery<Geofence[]>({
     queryKey: ["/api/geofences"],
@@ -478,8 +501,8 @@ function GeofenceManager() {
       <CardContent className="space-y-4">
         <div className="rounded-md overflow-hidden border" style={{ height: "350px" }} data-testid="geofence-map-container">
           <MapContainer
-            center={[59.3293, 18.0686]}
-            zoom={12}
+            center={defaultCenter}
+            zoom={13}
             style={{ height: "100%", width: "100%" }}
             scrollWheelZoom={true}
           >
@@ -488,7 +511,19 @@ function GeofenceManager() {
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
             <MapClickHandler onMapClick={handleMapClick} />
+            {carLat && carLon && <SetInitialView lat={carLat} lng={carLon} />}
             {flyTo && <FlyToLocation lat={flyTo.lat} lng={flyTo.lng} />}
+            {carLat && carLon && (
+              <Marker
+                position={[carLat, carLon]}
+                icon={L.divIcon({
+                  className: "car-location-marker",
+                  html: `<div style="width:24px;height:24px;border-radius:50%;background:#3b82f6;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="2"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9L18 10l-2.7-3.6A1 1 0 0 0 14.5 6h-5a1 1 0 0 0-.8.4L6 10l-2.5 1.1C2.7 11.3 2 12.1 2 13v3c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg></div>`,
+                  iconSize: [24, 24],
+                  iconAnchor: [12, 12],
+                })}
+              />
+            )}
             {selectedLat && selectedLng && (
               <>
                 <Marker position={[selectedLat, selectedLng]} />

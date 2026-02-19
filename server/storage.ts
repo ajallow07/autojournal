@@ -1,11 +1,12 @@
-import { eq, desc, asc, and, count } from "drizzle-orm";
+import { eq, desc, asc, and, count, gte } from "drizzle-orm";
 import { db } from "./db";
 import {
-  vehicles, trips, teslaConnections, geofences,
+  vehicles, trips, teslaConnections, geofences, telemetryEvents,
   type Vehicle, type InsertVehicle,
   type Trip, type InsertTrip,
   type TeslaConnection, type InsertTeslaConnection,
   type Geofence, type InsertGeofence,
+  type TelemetryEvent, type InsertTelemetryEvent,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -34,6 +35,10 @@ export interface IStorage {
   createGeofence(geofence: InsertGeofence): Promise<Geofence>;
   updateGeofence(id: string, data: Partial<InsertGeofence>): Promise<Geofence | undefined>;
   deleteGeofence(id: string): Promise<boolean>;
+
+  createTelemetryEvent(event: InsertTelemetryEvent): Promise<TelemetryEvent>;
+  getTelemetryEvents(userId: string, since?: Date): Promise<TelemetryEvent[]>;
+  getTelemetryEventsByVin(vin: string, since?: Date): Promise<TelemetryEvent[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -153,6 +158,29 @@ export class DatabaseStorage implements IStorage {
   async deleteGeofence(id: string): Promise<boolean> {
     const [deleted] = await db.delete(geofences).where(eq(geofences.id, id)).returning();
     return !!deleted;
+  }
+
+  async createTelemetryEvent(event: InsertTelemetryEvent): Promise<TelemetryEvent> {
+    const [created] = await db.insert(telemetryEvents).values(event).returning();
+    return created;
+  }
+
+  async getTelemetryEvents(userId: string, since?: Date): Promise<TelemetryEvent[]> {
+    const conditions = [eq(telemetryEvents.userId, userId)];
+    if (since) conditions.push(gte(telemetryEvents.createdAt, since));
+    return db.select().from(telemetryEvents)
+      .where(and(...conditions))
+      .orderBy(asc(telemetryEvents.createdAt))
+      .limit(2000);
+  }
+
+  async getTelemetryEventsByVin(vin: string, since?: Date): Promise<TelemetryEvent[]> {
+    const conditions = [eq(telemetryEvents.vin, vin)];
+    if (since) conditions.push(gte(telemetryEvents.createdAt, since));
+    return db.select().from(telemetryEvents)
+      .where(and(...conditions))
+      .orderBy(asc(telemetryEvents.createdAt))
+      .limit(2000);
   }
 }
 

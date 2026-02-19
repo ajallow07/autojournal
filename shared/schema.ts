@@ -88,10 +88,27 @@ export const geofences = pgTable("geofences", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const telemetryEvents = pgTable("telemetry_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  vin: text("vin").notNull(),
+  latitude: real("latitude"),
+  longitude: real("longitude"),
+  odometer: real("odometer"),
+  speed: real("speed"),
+  shiftState: text("shift_state"),
+  batteryLevel: real("battery_level"),
+  vehicleState: text("vehicle_state"),
+  source: text("source").notNull().default("webhook"),
+  rawPayload: jsonb("raw_payload"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const insertVehicleSchema = createInsertSchema(vehicles).omit({ id: true });
 export const insertTripSchema = createInsertSchema(trips).omit({ id: true, createdAt: true });
 export const insertTeslaConnectionSchema = createInsertSchema(teslaConnections).omit({ id: true, createdAt: true });
 export const insertGeofenceSchema = createInsertSchema(geofences).omit({ id: true, createdAt: true });
+export const insertTelemetryEventSchema = createInsertSchema(telemetryEvents).omit({ id: true, createdAt: true });
 
 export type InsertVehicle = z.infer<typeof insertVehicleSchema>;
 export type Vehicle = typeof vehicles.$inferSelect;
@@ -101,3 +118,5 @@ export type InsertTeslaConnection = z.infer<typeof insertTeslaConnectionSchema>;
 export type TeslaConnection = typeof teslaConnections.$inferSelect;
 export type InsertGeofence = z.infer<typeof insertGeofenceSchema>;
 export type Geofence = typeof geofences.$inferSelect;
+export type InsertTelemetryEvent = z.infer<typeof insertTelemetryEventSchema>;
+export type TelemetryEvent = typeof telemetryEvents.$inferSelect;

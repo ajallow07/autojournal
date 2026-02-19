@@ -15,6 +15,7 @@ import {
   setupTeslemetryConnection,
   fetchTeslemetryVehicleData,
   getWebhookUrl,
+  reconstructTripsFromTelemetry,
 } from "./teslemetry";
 
 function getUserId(req: any): string {
@@ -296,6 +297,36 @@ export async function registerRoutes(
       });
     } catch (error: any) {
       console.error("[Teslemetry Refresh] Error:", error.message);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/telemetry-events", isAuthenticated, async (req, res) => {
+    if (!isOwner(req)) return res.status(403).json({ message: "Tesla features are restricted" });
+    try {
+      const userId = getUserId(req);
+      const hours = parseInt(String(req.query.hours || "24"));
+      const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+      const events = await storage.getTelemetryEvents(userId, since);
+      res.json(events);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/telemetry/reconstruct", isAuthenticated, async (req, res) => {
+    if (!isOwner(req)) return res.status(403).json({ message: "Tesla features are restricted" });
+    try {
+      const userId = getUserId(req);
+      const connection = await storage.getTeslaConnection(userId);
+      if (!connection?.vin) {
+        return res.status(404).json({ message: "No Tesla connection found" });
+      }
+      const hours = req.body.hours || 24;
+      const result = await reconstructTripsFromTelemetry(userId, connection.vin, hours);
+      res.json(result);
+    } catch (error: any) {
+      console.error("[Reconstruct] Error:", error.message);
       res.status(500).json({ message: error.message });
     }
   });

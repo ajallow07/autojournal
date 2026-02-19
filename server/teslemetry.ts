@@ -412,6 +412,24 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
 
   console.log(`[Teslemetry] Webhook for VIN=${telemetry.vin} user=${connection.userId} shift=${shiftState || "null"} speed=${telemetry.speed} odo=${odometerKm?.toFixed(1)} lat=${lat} lon=${lon} vehicleState=${telemetry.vehicleState || "n/a"} locMoved=${locationMovedKm.toFixed(3)}km odoMoved=${odometerMovedKm.toFixed(3)}km movement=${movementDetected} isDriving=${isDriving} tripInProgress=${connection.tripInProgress}`);
 
+  try {
+    await storage.createTelemetryEvent({
+      userId: connection.userId,
+      vin: telemetry.vin,
+      latitude: lat ?? null,
+      longitude: lon ?? null,
+      odometer: odometerKm,
+      speed: telemetry.speed ?? null,
+      shiftState: shiftState ?? null,
+      batteryLevel: telemetry.batteryLevel ?? null,
+      vehicleState: telemetry.vehicleState ?? null,
+      source: hasTelemetryData ? "webhook" : "auto_fetch",
+      rawPayload: JSON.stringify(body).length > 5000 ? { _truncated: true, keys: Object.keys(body) } : body,
+    });
+  } catch (err: any) {
+    console.log(`[Teslemetry] Failed to persist telemetry event: ${err.message}`);
+  }
+
   const updateFields: Record<string, any> = {
     lastPolledAt: new Date(),
   };
@@ -578,6 +596,214 @@ export async function fetchTeslemetryVehicleData(vin: string): Promise<any> {
 export function getWebhookUrl(): string {
   const host = process.env.APP_DOMAIN || process.env.REPLIT_DEV_DOMAIN || "localhost:5000";
   return `https://${host}/api/teslemetry/webhook`;
+}
+
+export async function reconstructTripsFromTelemetry(userId: string, vin: string, sinceHours: number = 24): Promise<{ tripsCreated: number; details: string[] }> {
+  const since = new Date(Date.now() - sinceHours * 60 * 60 * 1000);
+  const events = await storage.getTelemetryEventsByVin(vin, since);
+  const details: string[] = [];
+
+  if (events.length === 0) {
+    return { tripsCreated: 0, details: ["No telemetry events found in the specified period"] };
+  }
+
+  details.push(`Found ${events.length} telemetry events in the last ${sinceHours}h`);
+
+  const connection = await findConnectionByVin(vin);
+  if (!connection) {
+    return { tripsCreated: 0, details: [...details, "No active Tesla connection for this VIN"] };
+  }
+
+  const userVehicles = await storage.getVehicles(userId);
+  const linkedVehicle = userVehicles.find((v) => v.id === connection.vehicleId) || userVehicles[0];
+  if (!linkedVehicle) {
+    return { tripsCreated: 0, details: [...details, "No vehicle linked to this connection"] };
+  }
+
+  interface TripSegment {
+    startTime: Date;
+    endTime: Date;
+    startLat: number | null;
+    startLon: number | null;
+    endLat: number | null;
+    endLon: number | null;
+    startOdo: number | null;
+    endOdo: number | null;
+    waypoints: Array<[number, number]>;
+    maxSpeed: number | null;
+  }
+
+  const segments: TripSegment[] = [];
+  let current: TripSegment | null = null;
+  let lastMovingTime: Date | null = null;
+
+  for (let i = 0; i < events.length; i++) {
+    const ev = events[i];
+    const evTime = new Date(ev.createdAt);
+
+    const isMoving =
+      (ev.shiftState === "D" || ev.shiftState === "R" || ev.shiftState === "N") ||
+      (ev.speed != null && ev.speed > 0);
+
+    const hasLocationChange = i > 0 && ev.latitude != null && ev.longitude != null &&
+      events[i - 1].latitude != null && events[i - 1].longitude != null &&
+      haversineDistance(events[i - 1].latitude!, events[i - 1].longitude!, ev.latitude!, ev.longitude!) > 50;
+
+    const hasOdometerChange = i > 0 && ev.odometer != null && events[i - 1].odometer != null &&
+      (ev.odometer! - events[i - 1].odometer!) > 0.1;
+
+    const isDriving = isMoving || hasLocationChange || hasOdometerChange;
+
+    if (isDriving) {
+      lastMovingTime = evTime;
+      if (!current) {
+        current = {
+          startTime: evTime,
+          endTime: evTime,
+          startLat: ev.latitude,
+          startLon: ev.longitude,
+          endLat: ev.latitude,
+          endLon: ev.longitude,
+          startOdo: ev.odometer,
+          endOdo: ev.odometer,
+          waypoints: [],
+          maxSpeed: ev.speed,
+        };
+        if (ev.latitude != null && ev.longitude != null) {
+          current.waypoints.push([ev.latitude, ev.longitude]);
+        }
+      } else {
+        current.endTime = evTime;
+        if (ev.latitude != null && ev.longitude != null) {
+          current.endLat = ev.latitude;
+          current.endLon = ev.longitude;
+          const lastWp = current.waypoints[current.waypoints.length - 1];
+          if (!lastWp || haversineDistance(lastWp[0], lastWp[1], ev.latitude, ev.longitude) > 20) {
+            current.waypoints.push([ev.latitude, ev.longitude]);
+          }
+        }
+        if (ev.odometer != null) current.endOdo = ev.odometer;
+        if (ev.speed != null && (current.maxSpeed == null || ev.speed > current.maxSpeed)) {
+          current.maxSpeed = ev.speed;
+        }
+      }
+    } else if (current && lastMovingTime) {
+      const idleMs = evTime.getTime() - lastMovingTime.getTime();
+      if (idleMs > 120000) {
+        segments.push(current);
+        current = null;
+        lastMovingTime = null;
+      } else {
+        if (ev.latitude != null && ev.longitude != null) {
+          current.endLat = ev.latitude;
+          current.endLon = ev.longitude;
+        }
+        if (ev.odometer != null) current.endOdo = ev.odometer;
+      }
+    }
+  }
+
+  if (current) {
+    segments.push(current);
+  }
+
+  details.push(`Detected ${segments.length} potential trip segment(s)`);
+
+  const existingTrips = await storage.getTrips(userId);
+  let tripsCreated = 0;
+
+  for (const seg of segments) {
+    let distance: number | null = null;
+    let distanceSource = "unknown";
+
+    if (seg.startOdo != null && seg.endOdo != null && seg.endOdo > seg.startOdo) {
+      distance = seg.endOdo - seg.startOdo;
+      distanceSource = "odometer";
+    }
+
+    if ((distance == null || distance <= 0) && seg.startLat != null && seg.startLon != null && seg.endLat != null && seg.endLon != null) {
+      distance = haversineDistance(seg.startLat, seg.startLon, seg.endLat, seg.endLon) / 1000;
+      distanceSource = "gps";
+    }
+
+    if (distance == null || distance < MIN_DISTANCE_KM) {
+      details.push(`Skipped segment ${seg.startTime.toLocaleTimeString("sv-SE")} - too short (${distance?.toFixed(2) || "unknown"} km)`);
+      continue;
+    }
+
+    const segDate = seg.startTime.toISOString().split("T")[0];
+    const segStartHHMM = seg.startTime.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+    const segEndHHMM = seg.endTime.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+
+    const isDuplicate = existingTrips.some(t => {
+      if (t.vehicleId !== linkedVehicle.id || t.date !== segDate) return false;
+      if (t.startTime === segStartHHMM && t.autoLogged) return true;
+      if (t.startOdometer && t.endOdometer && seg.startOdo != null && seg.endOdo != null) {
+        const odoOverlap = seg.startOdo < t.endOdometer && seg.endOdo > t.startOdometer;
+        if (odoOverlap) return true;
+      }
+      if (t.startTime && t.endTime) {
+        const tStart = t.startTime;
+        const tEnd = t.endTime;
+        const sStart = segStartHHMM;
+        const sEnd = segEndHHMM;
+        if (sStart < tEnd && sEnd > tStart) return true;
+      }
+      return false;
+    });
+
+    if (isDuplicate) {
+      details.push(`Skipped segment ${segStartHHMM}-${segEndHHMM} - already logged`);
+      continue;
+    }
+
+    const startOdo = seg.startOdo ?? linkedVehicle.currentOdometer ?? 0;
+    const endOdo = seg.endOdo ?? startOdo + distance;
+
+    const startLocation = seg.startLat != null && seg.startLon != null
+      ? await reverseGeocode(seg.startLat, seg.startLon)
+      : "Unknown";
+    const endLocation = seg.endLat != null && seg.endLon != null
+      ? await reverseGeocode(seg.endLat, seg.endLon)
+      : "Unknown";
+
+    const geofencesList = await storage.getGeofences(userId);
+    let tripType = "private";
+    if (seg.startLat != null && seg.startLon != null) {
+      const startGf = findMatchingGeofence(seg.startLat, seg.startLon, geofencesList);
+      if (startGf?.tripType === "business") tripType = "business";
+    }
+    if (seg.endLat != null && seg.endLon != null) {
+      const endGf = findMatchingGeofence(seg.endLat, seg.endLon, geofencesList);
+      if (endGf?.tripType === "business") tripType = "business";
+    }
+
+    await storage.createTrip({
+      userId,
+      vehicleId: linkedVehicle.id,
+      date: segDate,
+      startTime: segStartHHMM,
+      endTime: segEndHHMM,
+      startLocation,
+      endLocation,
+      startOdometer: Math.round(startOdo * 10) / 10,
+      endOdometer: Math.round(endOdo * 10) / 10,
+      distance: Math.round(distance * 10) / 10,
+      tripType,
+      autoLogged: true,
+      startLatitude: seg.startLat,
+      startLongitude: seg.startLon,
+      endLatitude: seg.endLat,
+      endLongitude: seg.endLon,
+      routeCoordinates: seg.waypoints.length > 0 ? seg.waypoints : null,
+      notes: `Reconstructed from telemetry (${distanceSource})`,
+    });
+
+    tripsCreated++;
+    details.push(`Created trip: ${startLocation} -> ${endLocation}, ${distance.toFixed(1)} km at ${segStartHHMM}-${segEndHHMM}`);
+  }
+
+  return { tripsCreated, details };
 }
 
 export async function setupTeslemetryConnection(userId: string): Promise<TeslaConnection> {

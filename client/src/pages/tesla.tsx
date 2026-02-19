@@ -14,12 +14,13 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   Zap, ZapOff, MapPin, Trash2, Plus, Radio, Car, Shield, Navigation, Circle,
-  RefreshCw, Link2, Unlink, Search, Webhook, Copy, Check,
+  RefreshCw, Link2, Unlink, Search, Webhook, Copy, Check, Database, RotateCcw,
+  ChevronDown, ChevronUp,
 } from "lucide-react";
 import { MapContainer, TileLayer, Circle as LeafletCircle, Marker, useMapEvents, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import type { Geofence, Vehicle } from "@shared/schema";
+import type { Geofence, Vehicle, TelemetryEvent } from "@shared/schema";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation } from "wouter";
 
@@ -684,6 +685,146 @@ function GeofenceManager() {
   );
 }
 
+function TelemetryLog() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [expanded, setExpanded] = useState(false);
+  const [hours, setHours] = useState("24");
+
+  const { data: events, isLoading } = useQuery<TelemetryEvent[]>({
+    queryKey: [`/api/telemetry-events?hours=${hours}`],
+    enabled: expanded,
+    refetchInterval: expanded ? 30000 : false,
+  });
+
+  const reconstructMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/telemetry/reconstruct", { hours: parseInt(hours) });
+      return res.json();
+    },
+    onSuccess: (data: { tripsCreated: number; details: string[] }) => {
+      qc.invalidateQueries({ queryKey: ["/api/trips"] });
+      toast({
+        title: data.tripsCreated > 0 ? `${data.tripsCreated} trip(s) created` : "No new trips found",
+        description: data.details.slice(-2).join(". "),
+      });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Reconstruction failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  return (
+    <Card>
+      <CardHeader
+        className="cursor-pointer"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <CardTitle className="flex items-center gap-2 flex-wrap">
+            <Database className="w-5 h-5" />
+            Telemetry Log
+          </CardTitle>
+          <div className="flex items-center gap-2">
+            {events && (
+              <Badge variant="secondary">{events.length} events</Badge>
+            )}
+            {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </div>
+        </div>
+        <CardDescription>
+          All incoming vehicle data is stored here. You can review it and reconstruct missed trips.
+        </CardDescription>
+      </CardHeader>
+      {expanded && (
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select value={hours} onValueChange={setHours}>
+              <SelectTrigger className="w-40" data-testid="select-telemetry-hours">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="6">Last 6 hours</SelectItem>
+                <SelectItem value="12">Last 12 hours</SelectItem>
+                <SelectItem value="24">Last 24 hours</SelectItem>
+                <SelectItem value="48">Last 48 hours</SelectItem>
+                <SelectItem value="168">Last 7 days</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              onClick={() => reconstructMutation.mutate()}
+              disabled={reconstructMutation.isPending}
+              data-testid="button-reconstruct-trips"
+            >
+              <RotateCcw className={`w-4 h-4 mr-2 ${reconstructMutation.isPending ? "animate-spin" : ""}`} />
+              {reconstructMutation.isPending ? "Scanning..." : "Reconstruct Trips"}
+            </Button>
+          </div>
+
+          {isLoading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-full" />
+            </div>
+          ) : events && events.length > 0 ? (
+            <div className="border rounded-md overflow-auto max-h-80">
+              <table className="w-full text-xs">
+                <thead className="bg-muted sticky top-0">
+                  <tr>
+                    <th className="text-left p-2 font-medium">Time</th>
+                    <th className="text-left p-2 font-medium">State</th>
+                    <th className="text-left p-2 font-medium">Shift</th>
+                    <th className="text-right p-2 font-medium">Speed</th>
+                    <th className="text-right p-2 font-medium">Odometer</th>
+                    <th className="text-left p-2 font-medium">Location</th>
+                    <th className="text-left p-2 font-medium">Source</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {events.map((ev) => (
+                    <tr key={ev.id} className="border-t">
+                      <td className="p-2 whitespace-nowrap">
+                        {new Date(ev.createdAt).toLocaleString("sv-SE", {
+                          month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit",
+                        })}
+                      </td>
+                      <td className="p-2">
+                        <Badge
+                          variant={ev.vehicleState === "online" ? "default" : "secondary"}
+                          className="text-[10px]"
+                        >
+                          {ev.vehicleState || "-"}
+                        </Badge>
+                      </td>
+                      <td className="p-2">{ev.shiftState || "-"}</td>
+                      <td className="p-2 text-right">{ev.speed != null ? `${ev.speed}` : "-"}</td>
+                      <td className="p-2 text-right">{ev.odometer != null ? ev.odometer.toLocaleString("sv-SE", { maximumFractionDigits: 1 }) : "-"}</td>
+                      <td className="p-2 whitespace-nowrap">
+                        {ev.latitude != null && ev.longitude != null
+                          ? `${ev.latitude.toFixed(4)}, ${ev.longitude.toFixed(4)}`
+                          : "-"}
+                      </td>
+                      <td className="p-2">
+                        <Badge variant="outline" className="text-[10px]">{ev.source}</Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              No telemetry events recorded yet. Events will appear here once your Tesla sends data.
+            </p>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
 function HowItWorks() {
   return (
     <Card>
@@ -754,6 +895,7 @@ export default function TeslaPage() {
 
       <HowItWorks />
       <TeslaConnectionCard />
+      <TelemetryLog />
       <GeofenceManager />
     </div>
   );

@@ -1,0 +1,70 @@
+Trip State Machine Algorithm
+Run this worker as a cron job or a persistent background process. It sequentially reads unprocessed events and applies a state machine to build trips.
+
+TypeScript
+export async function processPendingEvents() {
+  // 1. Fetch unprocessed events chronologically to handle out-of-order delivery
+  const events = await prisma.webhookEvent.findMany({
+    where: { processed: false },
+    orderBy: { createdAt: 'asc' },
+    take: 500 // Batching for efficiency
+  });
+
+  for (const event of events) {
+    await applyTripLogic(event);
+    
+    // Mark as processed
+    await prisma.webhookEvent.update({
+      where: { id: event.id },
+      data: { processed: true }
+    });
+  }
+}
+
+async function applyTripLogic(event: any) {
+  const { vin, createdAt, payload } = event;
+  const shiftState = payload.ShiftState; 
+  const speed = parseFloat(payload.VehicleSpeed || '0');
+
+  // Fetch the current open trip for this vehicle
+  const activeTrip = await prisma.trip.findFirst({
+    where: { vin, endTime: null },
+    orderBy: { startTime: 'desc' }
+  });
+
+  const isDriving = shiftState === 'D' || shiftState === 'R' || shiftState === 'N' || speed > 0;
+  const isParked = shiftState === 'P';
+
+  // State Transition: Start a new trip
+  if (isDriving && !activeTrip) {
+    await prisma.trip.create({
+      data: {
+        vin,
+        startTime: createdAt,
+        startOdometer: parseFloat(payload.Odometer || '0'),
+      }
+    });
+  } 
+  // State Transition: End the active trip
+  else if (isParked && activeTrip) {
+    await prisma.trip.update({
+      where: { id: activeTrip.id },
+      data: {
+        endTime: createdAt,
+        endOdometer: parseFloat(payload.Odometer || '0'),
+      }
+    });
+  } 
+  // State Continuation: Log telemetry points if currently on a trip
+  else if (activeTrip && payload.Location) {
+    await prisma.tripPoint.create({
+      data: {
+        tripId: activeTrip.id,
+        timestamp: createdAt,
+        latitude: payload.Location.latitude,
+        longitude: payload.Location.longitude,
+        speed: speed
+      }
+    });
+  }
+}

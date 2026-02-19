@@ -4,6 +4,23 @@ import type { TeslaConnection, Geofence } from "@shared/schema";
 const TESLEMETRY_API_BASE = "https://api.teslemetry.com";
 const PARKED_CONFIRMATION_MS = 120000;
 const MIN_DISTANCE_KM = 0.1;
+const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+
+let lastCleanupTime = 0;
+
+async function maybeCleanupTelemetryEvents() {
+  const now = Date.now();
+  if (now - lastCleanupTime < CLEANUP_INTERVAL_MS) return;
+  lastCleanupTime = now;
+  try {
+    const deleted = await storage.cleanupOldTelemetryEvents();
+    if (deleted > 0) {
+      console.log(`[Teslemetry] Cleaned up ${deleted} telemetry events older than 24h`);
+    }
+  } catch (err: any) {
+    console.log(`[Teslemetry] Cleanup error: ${err.message}`);
+  }
+}
 
 function getTeslemetryToken(): string {
   const token = process.env.TESLEMETRY_API_TOKEN;
@@ -563,6 +580,8 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
     ...updateFields,
     lastDriveState: isParked ? "parked" : "online",
   });
+
+  maybeCleanupTelemetryEvents();
 
   return { processed: true, action: "status_update" };
 }

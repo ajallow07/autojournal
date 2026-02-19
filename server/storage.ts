@@ -1,4 +1,4 @@
-import { eq, desc, asc, and, count, gte } from "drizzle-orm";
+import { eq, desc, asc, and, count, gte, lt } from "drizzle-orm";
 import { db } from "./db";
 import {
   vehicles, trips, teslaConnections, geofences, telemetryEvents,
@@ -39,6 +39,7 @@ export interface IStorage {
   createTelemetryEvent(event: InsertTelemetryEvent): Promise<TelemetryEvent>;
   getTelemetryEvents(userId: string, since?: Date): Promise<TelemetryEvent[]>;
   getTelemetryEventsByVin(vin: string, since?: Date): Promise<TelemetryEvent[]>;
+  cleanupOldTelemetryEvents(): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -181,6 +182,13 @@ export class DatabaseStorage implements IStorage {
       .where(and(...conditions))
       .orderBy(asc(telemetryEvents.createdAt))
       .limit(2000);
+  }
+  async cleanupOldTelemetryEvents(): Promise<number> {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const deleted = await db.delete(telemetryEvents)
+      .where(lt(telemetryEvents.createdAt, cutoff))
+      .returning({ id: telemetryEvents.id });
+    return deleted.length;
   }
 }
 

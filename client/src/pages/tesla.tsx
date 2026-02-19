@@ -689,17 +689,15 @@ function TelemetryLog() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [expanded, setExpanded] = useState(false);
-  const [hours, setHours] = useState("24");
-
   const { data: events, isLoading } = useQuery<TelemetryEvent[]>({
-    queryKey: [`/api/telemetry-events?hours=${hours}`],
+    queryKey: ["/api/telemetry-events?hours=24"],
     enabled: expanded,
     refetchInterval: expanded ? 30000 : false,
   });
 
   const reconstructMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/telemetry/reconstruct", { hours: parseInt(hours) });
+      const res = await apiRequest("POST", "/api/telemetry/reconstruct", { hours: 24 });
       return res.json();
     },
     onSuccess: (data: { tripsCreated: number; details: string[] }) => {
@@ -733,24 +731,12 @@ function TelemetryLog() {
           </div>
         </div>
         <CardDescription>
-          All incoming vehicle data is stored here. You can review it and reconstruct missed trips.
+          Last 24 hours of vehicle data. Older events are automatically cleaned up.
         </CardDescription>
       </CardHeader>
       {expanded && (
         <CardContent className="space-y-4">
           <div className="flex items-center gap-2 flex-wrap">
-            <Select value={hours} onValueChange={setHours}>
-              <SelectTrigger className="w-40" data-testid="select-telemetry-hours">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="6">Last 6 hours</SelectItem>
-                <SelectItem value="12">Last 12 hours</SelectItem>
-                <SelectItem value="24">Last 24 hours</SelectItem>
-                <SelectItem value="48">Last 48 hours</SelectItem>
-                <SelectItem value="168">Last 7 days</SelectItem>
-              </SelectContent>
-            </Select>
             <Button
               variant="outline"
               onClick={() => reconstructMutation.mutate()}

@@ -381,7 +381,7 @@ function SetInitialView({ lat, lng }: { lat: number; lng: number }) {
   const hasSetRef = useRef(false);
   useEffect(() => {
     if (!hasSetRef.current) {
-      map.setView([lat, lng], 13);
+      map.setView([lat, lng], 15);
       hasSetRef.current = true;
     }
   }, [lat, lng, map]);

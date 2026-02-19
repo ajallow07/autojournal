@@ -56,15 +56,17 @@ function findMatchingGeofence(lat: number, lon: number, geofencesList: Geofence[
 async function reverseGeocode(lat: number, lon: number): Promise<string> {
   try {
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=16&addressdetails=1`,
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`,
       { headers: { "User-Agent": "MahlisAutoJournal/1.0" } }
     );
     if (!res.ok) return `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
     const data = await res.json();
     const addr = data.address;
     if (addr) {
+      const street = addr.road || addr.pedestrian || addr.neighbourhood;
+      const streetWithNumber = street && addr.house_number ? `${street} ${addr.house_number}` : street;
       const parts = [
-        addr.road || addr.pedestrian || addr.neighbourhood,
+        streetWithNumber,
         addr.suburb || addr.city_district,
         addr.city || addr.town || addr.village,
       ].filter(Boolean);

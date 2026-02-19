@@ -269,8 +269,9 @@ async function autoFetchVehicleData(connection: TeslaConnection, telemetry: Tele
     if (driveState?.latitude != null) telemetry.latitude = driveState.latitude;
     if (driveState?.longitude != null) telemetry.longitude = driveState.longitude;
     if (driveState?.shift_state) telemetry.shiftState = driveState.shift_state;
+    if (driveState?.speed != null) telemetry.speed = driveState.speed;
 
-    console.log(`[Teslemetry] Auto-fetch result: odo=${telemetry.odometer?.toFixed(1)} lat=${telemetry.latitude} lon=${telemetry.longitude} shift=${telemetry.shiftState}`);
+    console.log(`[Teslemetry] Auto-fetch result: odo=${telemetry.odometer?.toFixed(1)} lat=${telemetry.latitude} lon=${telemetry.longitude} shift=${telemetry.shiftState} speed=${telemetry.speed}`);
   } catch (err: any) {
     console.log(`[Teslemetry] Auto-fetch failed (car may be asleep): ${err.message?.substring(0, 100)}`);
   }
@@ -313,10 +314,25 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
   const lon = telemetry.longitude ?? undefined;
   const shiftState = telemetry.shiftState;
 
-  const isDriving = shiftState === "D" || shiftState === "R" || shiftState === "N";
-  const isParked = shiftState === "P" || shiftState === "SNA" || (!shiftState && !isDriving);
+  const shiftDriving = shiftState === "D" || shiftState === "R" || shiftState === "N";
+  const shiftParked = shiftState === "P" || shiftState === "SNA";
 
-  console.log(`[Teslemetry] Webhook for VIN=${telemetry.vin} user=${connection.userId} shift=${shiftState || "null"} speed=${telemetry.speed} odo=${odometerKm?.toFixed(1)} lat=${lat} lon=${lon} vehicleState=${telemetry.vehicleState || "n/a"}`);
+  let locationMovedKm = 0;
+  if (lat && lon && connection.lastLatitude && connection.lastLongitude) {
+    locationMovedKm = haversineDistance(connection.lastLatitude, connection.lastLongitude, lat, lon) / 1000;
+  }
+  let odometerMovedKm = 0;
+  if (odometerKm != null && connection.lastOdometer != null && connection.lastOdometer > 0) {
+    odometerMovedKm = odometerKm - connection.lastOdometer;
+  }
+
+  const movementDetected = locationMovedKm > 0.05 || odometerMovedKm > 0.1;
+  const speedDetected = telemetry.speed != null && telemetry.speed > 0;
+
+  const isDriving = shiftDriving || (!shiftState && (movementDetected || speedDetected));
+  const isParked = shiftParked || (!shiftState && !isDriving);
+
+  console.log(`[Teslemetry] Webhook for VIN=${telemetry.vin} user=${connection.userId} shift=${shiftState || "null"} speed=${telemetry.speed} odo=${odometerKm?.toFixed(1)} lat=${lat} lon=${lon} vehicleState=${telemetry.vehicleState || "n/a"} locMoved=${locationMovedKm.toFixed(3)}km odoMoved=${odometerMovedKm.toFixed(3)}km movement=${movementDetected} isDriving=${isDriving}`);
 
   const updateFields: Record<string, any> = {
     lastPolledAt: new Date(),

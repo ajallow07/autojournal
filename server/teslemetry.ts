@@ -383,22 +383,109 @@ async function updateVehicleFromTelemetry(connection: TeslaConnection, odometerK
   }
 }
 
-export async function handleTelemetryWebhook(body: any): Promise<{ processed: boolean; action?: string }> {
-  let telemetry = parseWebhookPayload(body);
+export async function ingestTelemetryWebhook(body: any): Promise<{ accepted: boolean; eventId?: string }> {
+  const telemetry = parseWebhookPayload(body);
   if (!telemetry) {
-    return { processed: false };
+    return { accepted: false };
   }
 
   const connection = await findConnectionByVin(telemetry.vin);
   if (!connection) {
-    console.log(`[Teslemetry] No active connection for VIN ${telemetry.vin}`);
-    return { processed: false };
+    console.log(`[Teslemetry Ingest] No active connection for VIN ${telemetry.vin}`);
+    return { accepted: false };
   }
 
   const hasTelemetryData = telemetry.odometer != null || telemetry.shiftState != null || telemetry.latitude != null;
 
+  try {
+    const event = await storage.createTelemetryEvent({
+      userId: connection.userId,
+      vin: telemetry.vin,
+      latitude: telemetry.latitude ?? null,
+      longitude: telemetry.longitude ?? null,
+      odometer: telemetry.odometer ?? null,
+      speed: telemetry.speed ?? null,
+      shiftState: telemetry.shiftState ?? null,
+      batteryLevel: telemetry.batteryLevel ?? null,
+      vehicleState: telemetry.vehicleState ?? null,
+      source: hasTelemetryData ? "webhook" : "state_only",
+      rawPayload: JSON.stringify(body).length > 5000 ? { _truncated: true, keys: Object.keys(body) } : body,
+    });
+    console.log(`[Teslemetry Ingest] Stored event ${event.id} for VIN=${telemetry.vin} (shift=${telemetry.shiftState || "null"} state=${telemetry.vehicleState || "n/a"})`);
+    return { accepted: true, eventId: event.id };
+  } catch (err: any) {
+    console.error(`[Teslemetry Ingest] Failed to store event: ${err.message}`);
+    throw err;
+  }
+}
+
+let workerRunning = false;
+const WORKER_INTERVAL_MS = 5000;
+
+export function startTelemetryWorker(): void {
+  console.log(`[Teslemetry Worker] Starting background worker (interval=${WORKER_INTERVAL_MS}ms)`);
+  setInterval(async () => {
+    if (workerRunning) return;
+    workerRunning = true;
+    try {
+      await processTelemetryEvents();
+    } catch (err: any) {
+      console.error(`[Teslemetry Worker] Unhandled error: ${err.message}`);
+    } finally {
+      workerRunning = false;
+    }
+  }, WORKER_INTERVAL_MS);
+}
+
+async function processTelemetryEvents(): Promise<void> {
+  const events = await storage.getUnprocessedEvents(100);
+  if (events.length === 0) return;
+
+  const byVin = new Map<string, typeof events>();
+  for (const ev of events) {
+    const arr = byVin.get(ev.vin) || [];
+    arr.push(ev);
+    byVin.set(ev.vin, arr);
+  }
+
+  for (const [vin, vinEvents] of byVin) {
+    let connection = await findConnectionByVin(vin);
+    if (!connection) {
+      console.log(`[Teslemetry Worker] No connection for VIN=${vin}, marking ${vinEvents.length} events processed`);
+      await storage.markEventsProcessed(vinEvents.map(e => e.id));
+      continue;
+    }
+
+    for (const ev of vinEvents) {
+      try {
+        connection = await processOneEvent(ev, connection);
+      } catch (err: any) {
+        console.error(`[Teslemetry Worker] Error processing event ${ev.id}: ${err.message}`);
+      }
+      await storage.markEventsProcessed([ev.id]);
+    }
+  }
+
+  maybeCleanupTelemetryEvents();
+}
+
+async function processOneEvent(ev: any, connection: TeslaConnection): Promise<TeslaConnection> {
+  let telemetry: TelemetryData = {
+    vin: ev.vin,
+    createdAt: ev.createdAt?.toISOString() || new Date().toISOString(),
+    latitude: ev.latitude,
+    longitude: ev.longitude,
+    odometer: ev.odometer,
+    speed: ev.speed,
+    shiftState: ev.shiftState,
+    batteryLevel: ev.batteryLevel,
+    vehicleState: ev.vehicleState,
+  };
+
+  const hasTelemetryData = telemetry.odometer != null || telemetry.shiftState != null || telemetry.latitude != null;
+
   if (!hasTelemetryData) {
-    console.log(`[Teslemetry] No telemetry data in webhook (state=${telemetry.vehicleState || "n/a"}, tripInProgress=${connection.tripInProgress}) - auto-fetching via API`);
+    console.log(`[Teslemetry Worker] No telemetry data in event ${ev.id} (state=${telemetry.vehicleState || "n/a"}) - auto-fetching via API`);
     telemetry = await autoFetchVehicleData(connection, telemetry);
   }
 
@@ -426,25 +513,7 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
   const isDriving = !carOfflineOrAsleep && (shiftDriving || (!shiftState && (movementDetected || speedDetected)));
   const isParked = carOfflineOrAsleep || shiftParked || (!shiftState && !isDriving);
 
-  console.log(`[Teslemetry] Webhook for VIN=${telemetry.vin} user=${connection.userId} shift=${shiftState || "null"} speed=${telemetry.speed} odo=${odometerKm?.toFixed(1)} lat=${lat} lon=${lon} vehicleState=${telemetry.vehicleState || "n/a"} locMoved=${locationMovedKm.toFixed(3)}km odoMoved=${odometerMovedKm.toFixed(3)}km movement=${movementDetected} isDriving=${isDriving} tripInProgress=${connection.tripInProgress}`);
-
-  try {
-    await storage.createTelemetryEvent({
-      userId: connection.userId,
-      vin: telemetry.vin,
-      latitude: lat ?? null,
-      longitude: lon ?? null,
-      odometer: odometerKm,
-      speed: telemetry.speed ?? null,
-      shiftState: shiftState ?? null,
-      batteryLevel: telemetry.batteryLevel ?? null,
-      vehicleState: telemetry.vehicleState ?? null,
-      source: hasTelemetryData ? "webhook" : "auto_fetch",
-      rawPayload: JSON.stringify(body).length > 5000 ? { _truncated: true, keys: Object.keys(body) } : body,
-    });
-  } catch (err: any) {
-    console.log(`[Teslemetry] Failed to persist telemetry event: ${err.message}`);
-  }
+  console.log(`[Teslemetry Worker] Processing event ${ev.id} VIN=${ev.vin} user=${connection.userId} shift=${shiftState || "null"} speed=${telemetry.speed} odo=${odometerKm?.toFixed(1)} lat=${lat} lon=${lon} state=${telemetry.vehicleState || "n/a"} isDriving=${isDriving} tripInProgress=${connection.tripInProgress}`);
 
   const updateFields: Record<string, any> = {
     lastPolledAt: new Date(),
@@ -462,7 +531,7 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
     const locationName = lat && lon ? await reverseGeocode(lat, lon) : "Unknown";
     const initialWaypoints: Array<[number, number]> = [];
     if (lat && lon) initialWaypoints.push([lat, lon]);
-    await storage.updateTeslaConnection(connection.id, {
+    const updates = {
       ...updateFields,
       lastDriveState: "driving",
       pollState: "active_trip",
@@ -477,10 +546,10 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
       idleSince: null,
       consecutiveErrors: 0,
       lastApiErrorAt: null,
-    });
-
+    };
+    await storage.updateTeslaConnection(connection.id, updates);
     console.log(`[Teslemetry Trip] STARTED for user=${connection.userId} at ${locationName} odo=${odometerKm?.toFixed(1)}`);
-    return { processed: true, action: "trip_started" };
+    return { ...connection, ...updates, tripInProgress: true } as TeslaConnection;
   }
 
   if (isDriving && connection.tripInProgress) {
@@ -491,13 +560,14 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
         existingWaypoints.push([lat, lon]);
       }
     }
-    await storage.updateTeslaConnection(connection.id, {
+    const updates = {
       ...updateFields,
       lastDriveState: "driving",
       parkedSince: null,
       routeWaypoints: existingWaypoints,
-    });
-    return { processed: true, action: "driving_update" };
+    };
+    await storage.updateTeslaConnection(connection.id, updates);
+    return { ...connection, ...updates } as TeslaConnection;
   }
 
   if (isParked && connection.tripInProgress) {
@@ -510,7 +580,7 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
       const endLon = lon ?? (connection.lastLongitude ? Number(connection.lastLongitude) : undefined);
       const endOdo = odometerKm ?? (connection.lastOdometer ? Number(connection.lastOdometer) : null);
       await completeTripFromWebhook(connection, endLat, endLon, endOdo, tripWaypoints);
-      await storage.updateTeslaConnection(connection.id, {
+      const updates = {
         ...updateFields,
         lastPolledAt: now,
         lastDriveState: "parked",
@@ -525,20 +595,22 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
         routeWaypoints: null,
         parkedSince: null,
         idleSince: new Date(),
-      });
-      return { processed: true, action: "trip_ended_offline" };
+      };
+      await storage.updateTeslaConnection(connection.id, updates);
+      return { ...connection, ...updates, tripInProgress: false } as TeslaConnection;
     }
 
     if (!connection.parkedSince) {
       console.log(`[Teslemetry Trip] Parked detected for user=${connection.userId} - starting ${PARKED_CONFIRMATION_MS / 1000}s confirmation`);
-      await storage.updateTeslaConnection(connection.id, {
+      const updates = {
         ...updateFields,
         lastPolledAt: now,
         lastDriveState: "parked",
         lastShiftState: shiftState || "P",
         parkedSince: now,
-      });
-      return { processed: true, action: "parked_confirming" };
+      };
+      await storage.updateTeslaConnection(connection.id, updates);
+      return { ...connection, ...updates } as TeslaConnection;
     }
 
     const parkedDuration = now.getTime() - new Date(connection.parkedSince).getTime();
@@ -547,7 +619,7 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
       console.log(`[Teslemetry Trip] Park confirmed after ${Math.round(parkedDuration / 1000)}s for user=${connection.userId} - ending trip`);
       const tripWaypoints: Array<[number, number]> = Array.isArray(connection.routeWaypoints) ? (connection.routeWaypoints as Array<[number, number]>) : [];
       await completeTripFromWebhook(connection, lat, lon, odometerKm, tripWaypoints);
-      await storage.updateTeslaConnection(connection.id, {
+      const updates = {
         ...updateFields,
         lastPolledAt: now,
         lastDriveState: "parked",
@@ -562,27 +634,27 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
         routeWaypoints: null,
         parkedSince: null,
         idleSince: new Date(),
-      });
-      return { processed: true, action: "trip_ended" };
+      };
+      await storage.updateTeslaConnection(connection.id, updates);
+      return { ...connection, ...updates, tripInProgress: false } as TeslaConnection;
     }
 
-    await storage.updateTeslaConnection(connection.id, {
+    const updates = {
       ...updateFields,
       lastPolledAt: now,
       lastDriveState: "parked",
       lastShiftState: shiftState || "P",
-    });
-    return { processed: true, action: "parked_confirming" };
+    };
+    await storage.updateTeslaConnection(connection.id, updates);
+    return { ...connection, ...updates } as TeslaConnection;
   }
 
-  await storage.updateTeslaConnection(connection.id, {
+  const updates = {
     ...updateFields,
     lastDriveState: isParked ? "parked" : "online",
-  });
-
-  maybeCleanupTelemetryEvents();
-
-  return { processed: true, action: "status_update" };
+  };
+  await storage.updateTeslaConnection(connection.id, updates);
+  return { ...connection, ...updates } as TeslaConnection;
 }
 
 export async function fetchTeslemetryVehicles(): Promise<any[]> {

@@ -39,6 +39,8 @@ export interface IStorage {
   createTelemetryEvent(event: InsertTelemetryEvent): Promise<TelemetryEvent>;
   getTelemetryEvents(userId: string, since?: Date): Promise<TelemetryEvent[]>;
   getTelemetryEventsByVin(vin: string, since?: Date): Promise<TelemetryEvent[]>;
+  getUnprocessedEvents(limit?: number): Promise<TelemetryEvent[]>;
+  markEventsProcessed(ids: string[]): Promise<void>;
   cleanupOldTelemetryEvents(): Promise<number>;
 }
 
@@ -183,6 +185,20 @@ export class DatabaseStorage implements IStorage {
       .orderBy(asc(telemetryEvents.createdAt))
       .limit(2000);
   }
+  async getUnprocessedEvents(limit: number = 500): Promise<TelemetryEvent[]> {
+    return db.select().from(telemetryEvents)
+      .where(eq(telemetryEvents.processed, false))
+      .orderBy(asc(telemetryEvents.createdAt))
+      .limit(limit);
+  }
+
+  async markEventsProcessed(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    for (const id of ids) {
+      await db.update(telemetryEvents).set({ processed: true }).where(eq(telemetryEvents.id, id));
+    }
+  }
+
   async cleanupOldTelemetryEvents(): Promise<number> {
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const deleted = await db.delete(telemetryEvents)

@@ -101,6 +101,7 @@ export const telemetryEvents = pgTable("telemetry_events", {
   vehicleState: text("vehicle_state"),
   source: text("source").notNull().default("webhook"),
   rawPayload: jsonb("raw_payload"),
+  processed: boolean("processed").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

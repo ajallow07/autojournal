@@ -42,6 +42,7 @@ export const trips = pgTable("trips", {
   endLatitude: real("end_latitude"),
   endLongitude: real("end_longitude"),
   routeCoordinates: jsonb("route_coordinates"),
+  routeGeometry: jsonb("route_geometry"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

@@ -1,0 +1,48 @@
+This happens because your frontend is taking the raw, discrete GPS points from your TripPoint database table and connecting them with straight lines (a basic Polyline). When telemetry data is sparse—meaning there are gaps of several seconds or minutes between webhooks—those straight lines cut directly across buildings, parks, and blocks instead of following the actual curves of roads like Viksjöleden or Mälarvägen.
+
+To fix this, you need to implement Map Matching (often called "Snap to Roads"). This takes your raw GPS coordinates and aligns them to the known road network.
+
+Here are the most effective ways to solve this in your stack:
+
+1. The Best Approach: Use a Map Matching API
+Instead of drawing the raw coordinates directly, send your array of points to a routing engine's Map Matching API. The API will process the points, figure out which roads the driver was actually on, and return a detailed, road-aligned geometry to draw on your map.
+
+If you are using Mapbox on the frontend, their Map Matching API is perfect for this:
+
+How it works: You send a request to the Mapbox API with up to 100 coordinates per request.
+
+What you get back: A GeoJSON line string that perfectly hugs the road network.
+
+Conceptual TypeScript Example (Frontend or Backend):
+
+TypeScript
+async function fetchMatchedRoute(tripPoints: {longitude: number, latitude: number}[]) {
+  // Format points as 'lng,lat;lng,lat...'
+  const coordinates = tripPoints.map(p => `${p.longitude},${p.latitude}`).join(';');
+  const accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+  
+  const url = `https://api.mapbox.com/matching/v5/mapbox/driving/${coordinates}?geometries=geojson&access_token=${accessToken}`;
+  
+  const response = await fetch(url);
+  const data = await response.json();
+  
+  // data.matchings[0].geometry contains the road-aligned path
+  return data.matchings[0].geometry; 
+}
+Alternative APIs: Google Maps Roads API (snapToRoads endpoint) or OSRM (Open Source Routing Machine, which you can host yourself for free if you want to avoid API costs).
+
+2. Increase Webhook Frequency (If Possible)
+If Teslemetry allows you to configure the polling interval or webhook frequency, turning it up will give you more granular data. More points mean the straight lines will naturally follow the curve of the road much closer. However, this increases database writes and won't perfectly solve intersections, so Map Matching is still recommended.
+
+3. Post-Process in the Background Worker
+Instead of making the frontend calculate the matched route every time a user views a trip, you can add a step to your background worker:
+
+When a trip is marked as finished (the P shift state arrives).
+
+The worker pulls all the TripPoint coordinates for that trip.
+
+The worker calls the Map Matching API once.
+
+The worker saves the resulting detailed GeoJSON directly to a new routeGeometry column on the Trip table.
+
+The UI simply fetches and renders that single GeoJSON object.

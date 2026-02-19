@@ -762,50 +762,72 @@ export async function reconstructTripsFromTelemetry(userId: string, vin: string,
   const segments: TripSegment[] = [];
   let current: TripSegment | null = null;
   let lastMovingTime: Date | null = null;
+  let lastStreamGpsLat: number | null = null;
+  let lastStreamGpsLon: number | null = null;
+  let lastOdo: number | null = null;
 
   for (let i = 0; i < events.length; i++) {
     const ev = events[i];
     const evTime = new Date(ev.createdAt);
 
-    const isMoving =
-      (ev.shiftState === "D" || ev.shiftState === "R" || ev.shiftState === "N") ||
-      (ev.speed != null && ev.speed > 0);
+    const isAutoFetch = ev.source === "auto_fetch";
+    const isWebhookGps = !isAutoFetch && ev.latitude != null && ev.longitude != null;
 
-    const hasLocationChange = i > 0 && ev.latitude != null && ev.longitude != null &&
-      events[i - 1].latitude != null && events[i - 1].longitude != null &&
-      haversineDistance(events[i - 1].latitude!, events[i - 1].longitude!, ev.latitude!, ev.longitude!) > 50;
+    const shiftDriving = ev.shiftState === "D" || ev.shiftState === "R" || ev.shiftState === "N";
+    const offlineOrAsleep = ev.vehicleState === "offline" || ev.vehicleState === "asleep";
+    const staleShiftState = shiftDriving && offlineOrAsleep && (ev.speed == null || ev.speed === 0);
+    const isMovingByShift = shiftDriving && !staleShiftState;
+    const isMovingBySpeed = ev.speed != null && ev.speed > 0;
 
-    const hasOdometerChange = i > 0 && ev.odometer != null && events[i - 1].odometer != null &&
-      (ev.odometer! - events[i - 1].odometer!) > 0.1;
+    const hasLocationChange = isWebhookGps &&
+      lastStreamGpsLat != null && lastStreamGpsLon != null &&
+      haversineDistance(lastStreamGpsLat, lastStreamGpsLon, ev.latitude!, ev.longitude!) > 50;
 
-    const isDriving = isMoving || hasLocationChange || hasOdometerChange;
+    const hasOdometerChange = ev.odometer != null && lastOdo != null &&
+      (ev.odometer! - lastOdo) > 0.1;
+
+    if (isWebhookGps) {
+      lastStreamGpsLat = ev.latitude;
+      lastStreamGpsLon = ev.longitude;
+    }
+    if (ev.odometer != null) {
+      lastOdo = ev.odometer;
+    }
+
+    const isDriving = isMovingByShift || isMovingBySpeed || hasLocationChange || hasOdometerChange;
 
     if (isDriving) {
       lastMovingTime = evTime;
+      const gpsLat = isWebhookGps ? ev.latitude : (isAutoFetch ? null : ev.latitude);
+      const gpsLon = isWebhookGps ? ev.longitude : (isAutoFetch ? null : ev.longitude);
       if (!current) {
         current = {
           startTime: evTime,
           endTime: evTime,
-          startLat: ev.latitude,
-          startLon: ev.longitude,
-          endLat: ev.latitude,
-          endLon: ev.longitude,
+          startLat: gpsLat,
+          startLon: gpsLon,
+          endLat: gpsLat,
+          endLon: gpsLon,
           startOdo: ev.odometer,
           endOdo: ev.odometer,
           waypoints: [],
           maxSpeed: ev.speed,
         };
-        if (ev.latitude != null && ev.longitude != null) {
-          current.waypoints.push([ev.latitude, ev.longitude]);
+        if (gpsLat != null && gpsLon != null) {
+          current.waypoints.push([gpsLat, gpsLon]);
         }
       } else {
         current.endTime = evTime;
-        if (ev.latitude != null && ev.longitude != null) {
-          current.endLat = ev.latitude;
-          current.endLon = ev.longitude;
+        if (gpsLat != null && gpsLon != null) {
+          current.endLat = gpsLat;
+          current.endLon = gpsLon;
+          if (!current.startLat || !current.startLon) {
+            current.startLat = gpsLat;
+            current.startLon = gpsLon;
+          }
           const lastWp = current.waypoints[current.waypoints.length - 1];
-          if (!lastWp || haversineDistance(lastWp[0], lastWp[1], ev.latitude, ev.longitude) > 20) {
-            current.waypoints.push([ev.latitude, ev.longitude]);
+          if (!lastWp || haversineDistance(lastWp[0], lastWp[1], gpsLat, gpsLon) > 20) {
+            current.waypoints.push([gpsLat, gpsLon]);
           }
         }
         if (ev.odometer != null) current.endOdo = ev.odometer;
@@ -820,7 +842,7 @@ export async function reconstructTripsFromTelemetry(userId: string, vin: string,
         current = null;
         lastMovingTime = null;
       } else {
-        if (ev.latitude != null && ev.longitude != null) {
+        if (isWebhookGps) {
           current.endLat = ev.latitude;
           current.endLon = ev.longitude;
         }

@@ -205,6 +205,7 @@ async function completeTripFromWebhook(
   endLat: number | undefined,
   endLon: number | undefined,
   endOdometer: number | null,
+  routeWaypoints?: Array<[number, number]>,
 ): Promise<void> {
   let distance: number | null = null;
   let distanceSource = "unknown";
@@ -263,6 +264,15 @@ async function completeTripFromWebhook(
     if (linkedVehicle) {
       const now = new Date();
       const startTime = connection.tripStartTime || now;
+
+      const finalWaypoints = routeWaypoints && routeWaypoints.length > 0 ? routeWaypoints : null;
+      if (endLat && endLon && finalWaypoints) {
+        const lastWp = finalWaypoints[finalWaypoints.length - 1];
+        if (!lastWp || haversineDistance(lastWp[0], lastWp[1], endLat, endLon) > 20) {
+          finalWaypoints.push([endLat, endLon]);
+        }
+      }
+
       await storage.createTrip({
         userId: connection.userId,
         vehicleId: linkedVehicle.id,
@@ -276,6 +286,11 @@ async function completeTripFromWebhook(
         distance: Math.round(distance * 10) / 10,
         tripType,
         autoLogged: true,
+        startLatitude: connection.tripStartLatitude ?? null,
+        startLongitude: connection.tripStartLongitude ?? null,
+        endLatitude: endLat ?? null,
+        endLongitude: endLon ?? null,
+        routeCoordinates: finalWaypoints,
         notes: distanceSource === "gps" ? "Distance estimated via GPS (odometer unavailable)" : "Via Teslemetry",
       });
 
@@ -385,6 +400,8 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
 
   if (isDriving && !connection.tripInProgress) {
     const locationName = lat && lon ? await reverseGeocode(lat, lon) : "Unknown";
+    const initialWaypoints: Array<[number, number]> = [];
+    if (lat && lon) initialWaypoints.push([lat, lon]);
     await storage.updateTeslaConnection(connection.id, {
       ...updateFields,
       lastDriveState: "driving",
@@ -395,6 +412,7 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
       tripStartLatitude: lat ?? null,
       tripStartLongitude: lon ?? null,
       tripStartLocation: locationName,
+      routeWaypoints: initialWaypoints,
       parkedSince: null,
       idleSince: null,
       consecutiveErrors: 0,
@@ -406,10 +424,18 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
   }
 
   if (isDriving && connection.tripInProgress) {
+    const existingWaypoints: Array<[number, number]> = Array.isArray(connection.routeWaypoints) ? (connection.routeWaypoints as Array<[number, number]>) : [];
+    if (lat && lon) {
+      const lastWp = existingWaypoints[existingWaypoints.length - 1];
+      if (!lastWp || haversineDistance(lastWp[0], lastWp[1], lat, lon) > 20) {
+        existingWaypoints.push([lat, lon]);
+      }
+    }
     await storage.updateTeslaConnection(connection.id, {
       ...updateFields,
       lastDriveState: "driving",
       parkedSince: null,
+      routeWaypoints: existingWaypoints,
     });
     return { processed: true, action: "driving_update" };
   }
@@ -433,7 +459,8 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
 
     if (parkedDuration >= PARKED_CONFIRMATION_MS) {
       console.log(`[Teslemetry Trip] Park confirmed after ${Math.round(parkedDuration / 1000)}s for user=${connection.userId} - ending trip`);
-      await completeTripFromWebhook(connection, lat, lon, odometerKm);
+      const tripWaypoints: Array<[number, number]> = Array.isArray(connection.routeWaypoints) ? (connection.routeWaypoints as Array<[number, number]>) : [];
+      await completeTripFromWebhook(connection, lat, lon, odometerKm, tripWaypoints);
       await storage.updateTeslaConnection(connection.id, {
         ...updateFields,
         lastPolledAt: now,
@@ -446,6 +473,7 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
         tripStartLatitude: null,
         tripStartLongitude: null,
         tripStartLocation: null,
+        routeWaypoints: null,
         parkedSince: null,
         idleSince: new Date(),
       });

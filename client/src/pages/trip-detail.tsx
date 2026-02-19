@@ -4,9 +4,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Pencil, MapPin, Clock, Gauge, Briefcase, Home, FileText } from "lucide-react";
+import { ArrowLeft, Pencil, MapPin, Clock, Gauge, Briefcase, Home, FileText, Map } from "lucide-react";
 import type { Trip } from "@shared/schema";
 import { format, parseISO } from "date-fns";
+import TripMap from "@/components/trip-map";
 
 export default function TripDetail() {
   const params = useParams<{ id: string }>();
@@ -77,6 +78,27 @@ export default function TripDetail() {
           </div>
         </CardContent>
       </Card>
+
+      {(trip.startLatitude != null || trip.endLatitude != null || (trip.routeCoordinates != null && Array.isArray(trip.routeCoordinates))) && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+              <Map className="w-3.5 h-3.5" /> Route Map
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <TripMap
+              startLatitude={trip.startLatitude}
+              startLongitude={trip.startLongitude}
+              endLatitude={trip.endLatitude}
+              endLongitude={trip.endLongitude}
+              routeCoordinates={trip.routeCoordinates as Array<[number, number]> | null}
+              startLocation={trip.startLocation}
+              endLocation={trip.endLocation}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Card>

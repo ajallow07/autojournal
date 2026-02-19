@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, real, timestamp, boolean, date } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, real, timestamp, boolean, date, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -36,6 +36,11 @@ export const trips = pgTable("trips", {
   purpose: text("purpose"),
   notes: text("notes"),
   autoLogged: boolean("auto_logged").notNull().default(false),
+  startLatitude: real("start_latitude"),
+  startLongitude: real("start_longitude"),
+  endLatitude: real("end_latitude"),
+  endLongitude: real("end_longitude"),
+  routeCoordinates: jsonb("route_coordinates"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -63,6 +68,7 @@ export const teslaConnections = pgTable("tesla_connections", {
   tripStartLocation: text("trip_start_location"),
   lastShiftState: text("last_shift_state"),
   parkedSince: timestamp("parked_since"),
+  routeWaypoints: jsonb("route_waypoints"),
   pollState: text("poll_state").notNull().default("deep_sleep"),
   idleSince: timestamp("idle_since"),
   lastApiErrorAt: timestamp("last_api_error_at"),

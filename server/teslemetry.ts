@@ -330,16 +330,24 @@ async function autoFetchVehicleData(connection: TeslaConnection, telemetry: Tele
   return telemetry;
 }
 
-async function updateVehicleOdometer(connection: TeslaConnection, odometerKm: number) {
+async function updateVehicleFromTelemetry(connection: TeslaConnection, odometerKm: number | null, batteryLevel: number | null) {
   if (!connection.vehicleId) return;
   try {
     const vehicle = await storage.getVehicle(connection.vehicleId);
-    if (vehicle && odometerKm > (vehicle.currentOdometer || 0)) {
-      await storage.updateVehicle(vehicle.id, { currentOdometer: Math.round(odometerKm * 10) / 10 });
-      console.log(`[Teslemetry] Updated vehicle odometer to ${(Math.round(odometerKm * 10) / 10).toFixed(1)} km`);
+    if (!vehicle) return;
+    const updates: Record<string, any> = {};
+    if (odometerKm != null && odometerKm > (vehicle.currentOdometer || 0)) {
+      updates.currentOdometer = Math.round(odometerKm * 10) / 10;
+    }
+    if (batteryLevel != null) {
+      updates.batteryLevel = Math.round(batteryLevel);
+    }
+    if (Object.keys(updates).length > 0) {
+      await storage.updateVehicle(vehicle.id, updates);
+      console.log(`[Teslemetry] Updated vehicle: ${JSON.stringify(updates)}`);
     }
   } catch (err: any) {
-    console.log(`[Teslemetry] Failed to update vehicle odometer: ${err.message}`);
+    console.log(`[Teslemetry] Failed to update vehicle: ${err.message}`);
   }
 }
 
@@ -394,8 +402,8 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
   if (lon != null) updateFields.lastLongitude = lon;
   if (shiftState != null) updateFields.lastShiftState = shiftState;
 
-  if (odometerKm != null) {
-    await updateVehicleOdometer(connection, odometerKm);
+  if (odometerKm != null || telemetry.batteryLevel != null) {
+    await updateVehicleFromTelemetry(connection, odometerKm, telemetry.batteryLevel ?? null);
   }
 
   if (isDriving && !connection.tripInProgress) {

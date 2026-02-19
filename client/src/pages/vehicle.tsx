@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { Car, Save, Gauge, Calendar, Hash, Trash2, Pencil, X, Fuel, Palette } from "lucide-react";
+import { Car, Save, Gauge, Calendar, Hash, Trash2, Pencil, X, Fuel, Palette, BatteryCharging } from "lucide-react";
 import type { Vehicle } from "@shared/schema";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -276,6 +276,11 @@ function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
                 <span className="flex items-center gap-1">
                   <Gauge className="w-3.5 h-3.5" /> {vehicle.currentOdometer.toLocaleString("sv-SE", { maximumFractionDigits: 0 })} km
                 </span>
+                {vehicle.batteryLevel != null && (
+                  <span className="flex items-center gap-1" data-testid={`text-battery-${vehicle.id}`}>
+                    <BatteryCharging className="w-3.5 h-3.5" /> {vehicle.batteryLevel}%
+                  </span>
+                )}
               </div>
               {(vehicle.color || vehicle.fuelType || vehicle.vin) && (
                 <div className="flex items-center gap-2 mt-1 flex-wrap">

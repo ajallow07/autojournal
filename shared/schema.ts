@@ -17,6 +17,7 @@ export const vehicles = pgTable("vehicles", {
   color: text("color"),
   fuelType: text("fuel_type"),
   currentOdometer: real("current_odometer").notNull().default(0),
+  batteryLevel: real("battery_level"),
   isDefault: boolean("is_default").notNull().default(false),
 });
 

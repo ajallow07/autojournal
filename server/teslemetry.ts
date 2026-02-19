@@ -422,10 +422,9 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
   const movementDetected = locationMovedKm > 0.05 || odometerMovedKm > 0.1;
   const speedDetected = telemetry.speed != null && telemetry.speed > 0;
 
-  const isDriving = shiftDriving || (!shiftState && (movementDetected || speedDetected));
-
   const carOfflineOrAsleep = telemetry.vehicleState === "offline" || telemetry.vehicleState === "asleep";
-  const isParked = shiftParked || carOfflineOrAsleep || (!shiftState && !isDriving);
+  const isDriving = !carOfflineOrAsleep && (shiftDriving || (!shiftState && (movementDetected || speedDetected)));
+  const isParked = carOfflineOrAsleep || shiftParked || (!shiftState && !isDriving);
 
   console.log(`[Teslemetry] Webhook for VIN=${telemetry.vin} user=${connection.userId} shift=${shiftState || "null"} speed=${telemetry.speed} odo=${odometerKm?.toFixed(1)} lat=${lat} lon=${lon} vehicleState=${telemetry.vehicleState || "n/a"} locMoved=${locationMovedKm.toFixed(3)}km odoMoved=${odometerMovedKm.toFixed(3)}km movement=${movementDetected} isDriving=${isDriving} tripInProgress=${connection.tripInProgress}`);
 

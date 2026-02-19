@@ -119,21 +119,31 @@ function parseWebhookPayload(body: any): TelemetryData | null {
       const value = item.value;
 
       if (key && value !== undefined && value !== null) {
+        const getNumeric = (): number | null => {
+          if (value.doubleValue != null) return parseFloat(String(value.doubleValue));
+          if (value.stringValue != null) return parseFloat(String(value.stringValue));
+          if (value.floatValue != null) return parseFloat(String(value.floatValue));
+          if (value.intValue != null) return parseInt(String(value.intValue));
+          return null;
+        };
+        const getString = (): string | null => {
+          if (value.stringValue != null) return String(value.stringValue);
+          if (value.doubleValue != null) return String(value.doubleValue);
+          return null;
+        };
+
         switch (key) {
           case "ShiftState":
           case "Gear":
-            result.shiftState = value.stringValue != null ? String(value.stringValue) : null;
+            result.shiftState = getString();
             break;
-          case "VehicleSpeed": {
-            const sv = value.stringValue;
-            result.speed = sv != null ? parseFloat(String(sv)) : null;
+          case "VehicleSpeed":
+            result.speed = getNumeric();
             break;
-          }
           case "Odometer": {
-            const ov = value.stringValue;
-            if (ov != null) {
-              const miles = parseFloat(String(ov));
-              result.odometer = !isNaN(miles) ? miles * 1.60934 : null;
+            const miles = getNumeric();
+            if (miles != null && !isNaN(miles)) {
+              result.odometer = miles * 1.60934;
             }
             break;
           }
@@ -143,14 +153,12 @@ function parseWebhookPayload(body: any): TelemetryData | null {
               result.longitude = value.locationValue.longitude ?? null;
             }
             break;
-          case "BatteryLevel": {
-            const bv = value.stringValue;
-            result.batteryLevel = bv != null ? parseFloat(String(bv)) : null;
+          case "BatteryLevel":
+            result.batteryLevel = getNumeric();
             break;
-          }
           case "ChargingState":
           case "DetailedChargeState":
-            result.chargingState = value.stringValue != null ? String(value.stringValue) : null;
+            result.chargingState = getString();
             break;
         }
         continue;

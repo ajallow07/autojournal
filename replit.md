@@ -4,6 +4,9 @@
 Mahlis Auto Journal — a smart driver's journal application for logging and managing car trips for Tesla vehicles, based in Stockholm, Sweden. Supports multi-user authentication (Google OAuth, username/password), business/private trip classification, odometer tracking, comprehensive reports with CSV export, and Teslemetry webhook integration for automatic trip logging.
 
 ## Recent Changes
+- 2026-02-19: Store-and-forward webhook architecture: webhook instantly stores event and returns 200, background worker processes events every 5s for trip detection
+- 2026-02-19: Added `processed` flag to telemetry_events table; worker marks events processed after trip detection
+- 2026-02-19: Background telemetry worker started on server boot (startTelemetryWorker in server/index.ts)
 - 2026-02-19: Added telemetry_events table to persist all incoming webhook data for debugging and trip reconstruction
 - 2026-02-19: Added trip reconstruction feature: scans stored telemetry events to create trips that real-time detection missed
 - 2026-02-19: Fixed trip detection: always auto-fetch vehicle data on state-only webhooks (including offline/asleep), end trips immediately when car goes offline

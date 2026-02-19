@@ -13,6 +13,7 @@ import {
   isTeslemetryConfigured,
   ingestTelemetryWebhook,
   setupTeslemetryConnection,
+  matchRouteToRoads,
   fetchTeslemetryVehicleData,
   getWebhookUrl,
   reconstructTripsFromTelemetry,
@@ -309,6 +310,28 @@ export async function registerRoutes(
       const since = new Date(Date.now() - hours * 60 * 60 * 1000);
       const events = await storage.getTelemetryEvents(userId, since);
       res.json(events);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/trips/rematch-routes", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const trips = await storage.getTrips(userId);
+      const toMatch = trips.filter(
+        (t: any) => t.routeCoordinates && Array.isArray(t.routeCoordinates) && t.routeCoordinates.length >= 2 && !t.routeGeometry
+      );
+      let matched = 0;
+      for (const trip of toMatch) {
+        const geometry = await matchRouteToRoads(trip.routeCoordinates as Array<[number, number]>);
+        if (geometry) {
+          await storage.updateTrip(trip.id, { routeGeometry: geometry });
+          matched++;
+        }
+        await new Promise(r => setTimeout(r, 1100));
+      }
+      res.json({ total: toMatch.length, matched });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

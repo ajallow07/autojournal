@@ -8,6 +8,7 @@ interface TripMapProps {
   endLatitude?: number | null;
   endLongitude?: number | null;
   routeCoordinates?: Array<[number, number]> | null;
+  routeGeometry?: Array<[number, number]> | null;
   startLocation?: string;
   endLocation?: string;
 }
@@ -18,6 +19,7 @@ export default function TripMap({
   endLatitude,
   endLongitude,
   routeCoordinates,
+  routeGeometry,
   startLocation,
   endLocation,
 }: TripMapProps) {
@@ -26,7 +28,8 @@ export default function TripMap({
 
   const hasStart = startLatitude != null && startLongitude != null;
   const hasEnd = endLatitude != null && endLongitude != null;
-  const hasRoute = routeCoordinates && routeCoordinates.length >= 2;
+  const displayRoute = routeGeometry && routeGeometry.length >= 2 ? routeGeometry : routeCoordinates;
+  const hasRoute = displayRoute && displayRoute.length >= 2;
 
   useEffect(() => {
     if (!mapRef.current) return;
@@ -81,7 +84,7 @@ export default function TripMap({
     }
 
     if (hasRoute) {
-      const latlngs: L.LatLngExpression[] = routeCoordinates.map(
+      const latlngs: L.LatLngExpression[] = displayRoute!.map(
         ([lat, lon]) => [lat, lon] as L.LatLngTuple
       );
 
@@ -123,7 +126,7 @@ export default function TripMap({
         mapInstance.current = null;
       }
     };
-  }, [startLatitude, startLongitude, endLatitude, endLongitude, routeCoordinates, startLocation, endLocation, hasStart, hasEnd, hasRoute]);
+  }, [startLatitude, startLongitude, endLatitude, endLongitude, routeCoordinates, routeGeometry, startLocation, endLocation, hasStart, hasEnd, hasRoute]);
 
   if (!hasStart && !hasEnd && !hasRoute) {
     return null;

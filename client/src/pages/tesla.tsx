@@ -712,6 +712,23 @@ function TelemetryLog() {
     },
   });
 
+  const rematchMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/trips/rematch-routes");
+      return res.json();
+    },
+    onSuccess: (data: { total: number; matched: number }) => {
+      qc.invalidateQueries({ queryKey: ["/api/trips"] });
+      toast({
+        title: data.matched > 0 ? `${data.matched} route(s) snapped to roads` : "No routes to process",
+        description: data.total > 0 ? `${data.total} trips checked, ${data.matched} matched` : "All trips already have road-matched routes",
+      });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Route matching failed", description: error.message, variant: "destructive" });
+    },
+  });
+
   return (
     <Card>
       <CardHeader
@@ -745,6 +762,15 @@ function TelemetryLog() {
             >
               <RotateCcw className={`w-4 h-4 mr-2 ${reconstructMutation.isPending ? "animate-spin" : ""}`} />
               {reconstructMutation.isPending ? "Scanning..." : "Reconstruct Trips"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => rematchMutation.mutate()}
+              disabled={rematchMutation.isPending}
+              data-testid="button-rematch-routes"
+            >
+              <Navigation className={`w-4 h-4 mr-2 ${rematchMutation.isPending ? "animate-spin" : ""}`} />
+              {rematchMutation.isPending ? "Matching..." : "Snap Routes to Roads"}
             </Button>
           </div>
 

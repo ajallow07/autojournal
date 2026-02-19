@@ -93,6 +93,7 @@ export default function TripDetail() {
               endLatitude={trip.endLatitude}
               endLongitude={trip.endLongitude}
               routeCoordinates={trip.routeCoordinates as Array<[number, number]> | null}
+              routeGeometry={trip.routeGeometry as Array<[number, number]> | null}
               startLocation={trip.startLocation}
               endLocation={trip.endLocation}
             />

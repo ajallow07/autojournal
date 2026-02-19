@@ -76,6 +76,57 @@ async function reverseGeocode(lat: number, lon: number): Promise<string> {
   }
 }
 
+function downsampleWaypoints(waypoints: Array<[number, number]>, maxPoints: number): Array<[number, number]> {
+  if (waypoints.length <= maxPoints) return waypoints;
+  const result: Array<[number, number]> = [waypoints[0]];
+  const step = (waypoints.length - 1) / (maxPoints - 1);
+  for (let i = 1; i < maxPoints - 1; i++) {
+    result.push(waypoints[Math.round(i * step)]);
+  }
+  result.push(waypoints[waypoints.length - 1]);
+  return result;
+}
+
+export async function matchRouteToRoads(
+  waypoints: Array<[number, number]>,
+): Promise<Array<[number, number]> | null> {
+  if (!waypoints || waypoints.length < 2) return null;
+
+  try {
+    const sampled = downsampleWaypoints(waypoints, 10);
+    const coords = sampled.map(([lat, lon]) => `${lon},${lat}`).join(";");
+    const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
+
+    const res = await fetch(url, {
+      headers: { "User-Agent": "MahlisAutoJournal/1.0" },
+    });
+
+    if (!res.ok) {
+      console.log(`[OSRM] Route failed: HTTP ${res.status}`);
+      return null;
+    }
+
+    const data = await res.json();
+    if (data.code !== "Ok" || !data.routes || data.routes.length === 0) {
+      console.log(`[OSRM] No route found: ${data.code}`);
+      return null;
+    }
+
+    const geom = data.routes[0].geometry;
+    if (!geom?.coordinates || geom.coordinates.length < 2) return null;
+
+    const allCoords: Array<[number, number]> = geom.coordinates.map(
+      ([lon, lat]: [number, number]) => [lat, lon] as [number, number]
+    );
+
+    console.log(`[OSRM] Matched route: ${waypoints.length} raw points -> ${allCoords.length} road-snapped points`);
+    return allCoords;
+  } catch (err: any) {
+    console.log(`[OSRM] Route error: ${err.message}`);
+    return null;
+  }
+}
+
 interface TelemetryData {
   vin: string;
   createdAt: string;
@@ -303,7 +354,12 @@ async function completeTripFromWebhook(
         }
       }
 
-      await storage.createTrip({
+      let routeGeometry: Array<[number, number]> | null = null;
+      if (finalWaypoints && finalWaypoints.length >= 2) {
+        routeGeometry = await matchRouteToRoads(finalWaypoints);
+      }
+
+      const newTrip = await storage.createTrip({
         userId: connection.userId,
         vehicleId: linkedVehicle.id,
         date: now.toISOString().split("T")[0],
@@ -321,6 +377,7 @@ async function completeTripFromWebhook(
         endLatitude: endLat ?? null,
         endLongitude: endLon ?? null,
         routeCoordinates: finalWaypoints,
+        routeGeometry,
         notes: distanceSource === "gps" ? "Distance estimated via GPS (odometer unavailable)" : "Via Teslemetry",
       });
 
@@ -328,7 +385,7 @@ async function completeTripFromWebhook(
         await storage.updateVehicle(linkedVehicle.id, { currentOdometer: Math.round(endOdo * 10) / 10 });
       }
 
-      console.log(`[Teslemetry Trip] SAVED for user=${connection.userId}: ${connection.tripStartLocation} -> ${endLocationName}, ${distance.toFixed(1)} km (${distanceSource}), type=${tripType}`);
+      console.log(`[Teslemetry Trip] SAVED for user=${connection.userId}: ${connection.tripStartLocation} -> ${endLocationName}, ${distance.toFixed(1)} km (${distanceSource}), type=${tripType}, route=${routeGeometry ? routeGeometry.length + " matched pts" : "raw"}`);
     }
   } else {
     console.log(`[Teslemetry Trip] DISCARDED for user=${connection.userId}: distance=${distance?.toFixed(2) || "unknown"} km (too short or no location data)`);
@@ -926,6 +983,12 @@ export async function reconstructTripsFromTelemetry(userId: string, vin: string,
       if (endGf?.tripType === "business") tripType = "business";
     }
 
+    const rawWaypoints = seg.waypoints.length > 0 ? seg.waypoints : null;
+    let routeGeometry: Array<[number, number]> | null = null;
+    if (rawWaypoints && rawWaypoints.length >= 2) {
+      routeGeometry = await matchRouteToRoads(rawWaypoints);
+    }
+
     await storage.createTrip({
       userId,
       vehicleId: linkedVehicle.id,
@@ -943,7 +1006,8 @@ export async function reconstructTripsFromTelemetry(userId: string, vin: string,
       startLongitude: seg.startLon,
       endLatitude: seg.endLat,
       endLongitude: seg.endLon,
-      routeCoordinates: seg.waypoints.length > 0 ? seg.waypoints : null,
+      routeCoordinates: rawWaypoints,
+      routeGeometry,
       notes: `Reconstructed from telemetry (${distanceSource})`,
     });
 

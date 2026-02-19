@@ -449,8 +449,8 @@ async function processTelemetryEvents(): Promise<void> {
     byVin.set(ev.vin, arr);
   }
 
-  for (const [vin, vinEvents] of byVin) {
-    vinEvents.sort((a, b) => {
+  for (const [vin, vinEvents] of Array.from(byVin)) {
+    vinEvents.sort((a: typeof events[number], b: typeof events[number]) => {
       const timeDiff = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
       return timeDiff !== 0 ? timeDiff : a.id.localeCompare(b.id);
     });
@@ -458,7 +458,7 @@ async function processTelemetryEvents(): Promise<void> {
     let connection = await findConnectionByVin(vin);
     if (!connection) {
       console.log(`[Teslemetry Worker] No connection for VIN=${vin}, marking ${vinEvents.length} events processed`);
-      await storage.markEventsProcessed(vinEvents.map(e => e.id));
+      await storage.markEventsProcessed(vinEvents.map((e: typeof events[number]) => e.id));
       continue;
     }
 

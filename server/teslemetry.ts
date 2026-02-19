@@ -5,6 +5,7 @@ const TESLEMETRY_API_BASE = "https://api.teslemetry.com";
 const PARKED_CONFIRMATION_MS = 120000;
 const MIN_DISTANCE_KM = 0.1;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+const STALE_TRIP_MS = 12 * 60 * 60 * 1000;
 
 let lastCleanupTime = 0;
 
@@ -531,6 +532,35 @@ async function processOneEvent(ev: any, connection: TeslaConnection): Promise<Te
 
   if (odometerKm != null || telemetry.batteryLevel != null) {
     await updateVehicleFromTelemetry(connection, odometerKm, telemetry.batteryLevel ?? null);
+  }
+
+  if (connection.tripInProgress && connection.tripStartTime) {
+    const eventTime = ev.createdAt ? new Date(ev.createdAt).getTime() : Date.now();
+    const tripAge = eventTime - new Date(connection.tripStartTime).getTime();
+    if (tripAge > STALE_TRIP_MS) {
+      console.log(`[Teslemetry Trip] STALE trip detected for user=${connection.userId} (${Math.round(tripAge / 3600000)}h old) - auto-closing`);
+      const tripWaypoints: Array<[number, number]> = Array.isArray(connection.routeWaypoints) ? (connection.routeWaypoints as Array<[number, number]>) : [];
+      const endLat = connection.lastLatitude ? Number(connection.lastLatitude) : undefined;
+      const endLon = connection.lastLongitude ? Number(connection.lastLongitude) : undefined;
+      const endOdo = connection.lastOdometer ? Number(connection.lastOdometer) : null;
+      await completeTripFromWebhook(connection, endLat, endLon, endOdo, tripWaypoints);
+      const staleUpdates = {
+        lastDriveState: "parked",
+        pollState: "awake_idle",
+        tripInProgress: false,
+        tripStartTime: null,
+        tripStartOdometer: null,
+        tripStartLatitude: null,
+        tripStartLongitude: null,
+        tripStartLocation: null,
+        routeWaypoints: null,
+        parkedSince: null,
+        idleSince: new Date(),
+      };
+      await storage.updateTeslaConnection(connection.id, staleUpdates);
+      connection = { ...connection, ...staleUpdates, tripInProgress: false } as TeslaConnection;
+      console.log(`[Teslemetry Trip] Stale trip auto-closed for user=${connection.userId}`);
+    }
   }
 
   if (isDriving && !connection.tripInProgress) {

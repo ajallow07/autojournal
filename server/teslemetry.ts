@@ -94,52 +94,89 @@ function parseWebhookPayload(body: any): TelemetryData | null {
     result.vehicleState = String(body.state);
   }
 
-  const data = body.data || body;
+  let data = body.data || body;
 
   console.log(`[Teslemetry] Raw webhook keys: ${JSON.stringify(Object.keys(body))}${body.data ? `, data keys: ${JSON.stringify(Object.keys(body.data))}` : ""}`);
 
+  if (body.data) {
+    console.log(`[Teslemetry] Data payload: ${JSON.stringify(body.data).substring(0, 500)}`);
+  }
+
+  if (!Array.isArray(data) && typeof data === "object" && data !== null) {
+    const keys = Object.keys(data);
+    const isNumberedObject = keys.length > 0 && keys.every(k => /^\d+$/.test(k));
+    if (isNumberedObject) {
+      data = keys.map(k => data[k]);
+      console.log(`[Teslemetry] Converted numbered object to array with ${data.length} items`);
+    }
+  }
+
   if (Array.isArray(data)) {
     for (const item of data) {
+      if (!item || typeof item !== "object") continue;
+
       const key = item.key;
       const value = item.value;
-      if (!key || value === undefined || value === null) continue;
 
-      switch (key) {
-        case "ShiftState":
-          result.shiftState = value.stringValue != null ? String(value.stringValue) : null;
-          break;
-        case "VehicleSpeed": {
-          const sv = value.stringValue;
-          result.speed = sv != null ? parseFloat(String(sv)) : null;
-          break;
-        }
-        case "Odometer": {
-          const ov = value.stringValue;
-          if (ov != null) {
-            const miles = parseFloat(String(ov));
-            result.odometer = !isNaN(miles) ? miles * 1.60934 : null;
+      if (key && value !== undefined && value !== null) {
+        switch (key) {
+          case "ShiftState":
+          case "Gear":
+            result.shiftState = value.stringValue != null ? String(value.stringValue) : null;
+            break;
+          case "VehicleSpeed": {
+            const sv = value.stringValue;
+            result.speed = sv != null ? parseFloat(String(sv)) : null;
+            break;
           }
-          break;
-        }
-        case "Location":
-          if (value.locationValue) {
-            result.latitude = value.locationValue.latitude ?? null;
-            result.longitude = value.locationValue.longitude ?? null;
+          case "Odometer": {
+            const ov = value.stringValue;
+            if (ov != null) {
+              const miles = parseFloat(String(ov));
+              result.odometer = !isNaN(miles) ? miles * 1.60934 : null;
+            }
+            break;
           }
-          break;
-        case "BatteryLevel": {
-          const bv = value.stringValue;
-          result.batteryLevel = bv != null ? parseFloat(String(bv)) : null;
-          break;
+          case "Location":
+            if (value.locationValue) {
+              result.latitude = value.locationValue.latitude ?? null;
+              result.longitude = value.locationValue.longitude ?? null;
+            }
+            break;
+          case "BatteryLevel": {
+            const bv = value.stringValue;
+            result.batteryLevel = bv != null ? parseFloat(String(bv)) : null;
+            break;
+          }
+          case "ChargingState":
+          case "DetailedChargeState":
+            result.chargingState = value.stringValue != null ? String(value.stringValue) : null;
+            break;
         }
-        case "ChargingState":
-        case "DetailedChargeState":
-          result.chargingState = value.stringValue != null ? String(value.stringValue) : null;
-          break;
+        continue;
+      }
+
+      if (item.ShiftState !== undefined || item.Gear !== undefined) {
+        result.shiftState = String(item.ShiftState ?? item.Gear);
+      }
+      if (item.VehicleSpeed !== undefined) {
+        result.speed = parseFloat(String(item.VehicleSpeed));
+      }
+      if (item.Odometer !== undefined) {
+        const miles = parseFloat(String(item.Odometer));
+        result.odometer = !isNaN(miles) ? miles * 1.60934 : null;
+      }
+      if (item.Location) {
+        result.latitude = item.Location.latitude ?? null;
+        result.longitude = item.Location.longitude ?? null;
+      }
+      if (item.BatteryLevel !== undefined) {
+        result.batteryLevel = parseFloat(String(item.BatteryLevel));
       }
     }
   } else if (typeof data === "object") {
     if (data.ShiftState !== undefined) result.shiftState = String(data.ShiftState);
+    if (data.Gear !== undefined) result.shiftState = String(data.Gear);
     if (data.VehicleSpeed !== undefined) result.speed = parseFloat(String(data.VehicleSpeed));
     if (data.Odometer !== undefined) {
       const miles = parseFloat(String(data.Odometer));

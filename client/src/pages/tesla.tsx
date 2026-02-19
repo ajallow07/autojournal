@@ -379,12 +379,8 @@ function FlyToLocation({ lat, lng }: { lat: number; lng: number }) {
 
 function SetInitialView({ lat, lng }: { lat: number; lng: number }) {
   const map = useMap();
-  const hasSetRef = useRef(false);
   useEffect(() => {
-    if (!hasSetRef.current) {
-      map.setView([lat, lng], 15);
-      hasSetRef.current = true;
-    }
+    map.setView([lat, lng], 15);
   }, [lat, lng, map]);
   return null;
 }

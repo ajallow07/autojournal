@@ -94,6 +94,10 @@ function parseWebhookPayload(body: any): TelemetryData | null {
     result.vehicleState = String(body.state);
   }
 
+  if (body.status) {
+    result.vehicleState = String(body.status);
+  }
+
   let data = body.data || body;
 
   console.log(`[Teslemetry] Raw webhook keys: ${JSON.stringify(Object.keys(body))}${body.data ? `, data keys: ${JSON.stringify(Object.keys(body.data))}` : ""}`);
@@ -318,22 +322,25 @@ async function autoFetchVehicleData(connection: TeslaConnection, telemetry: Tele
     const token = getTeslemetryToken();
     if (!token) return telemetry;
 
-    console.log(`[Teslemetry] Auto-fetching vehicle data for VIN=${telemetry.vin} (state=${telemetry.vehicleState})`);
+    console.log(`[Teslemetry] Auto-fetching vehicle data for VIN=${telemetry.vin} (state=${telemetry.vehicleState}, tripInProgress=${connection.tripInProgress})`);
     const vehicleData = await fetchTeslemetryVehicleData(telemetry.vin);
     const driveState = vehicleData?.drive_state;
-    const vehicleState = vehicleData?.vehicle_state;
+    const vehicleStateData = vehicleData?.vehicle_state;
 
-    if (vehicleState?.odometer != null && vehicleState.odometer > 0) {
-      telemetry.odometer = vehicleState.odometer * 1.60934;
+    if (vehicleStateData?.odometer != null && vehicleStateData.odometer > 0) {
+      telemetry.odometer = vehicleStateData.odometer * 1.60934;
     }
     if (driveState?.latitude != null) telemetry.latitude = driveState.latitude;
     if (driveState?.longitude != null) telemetry.longitude = driveState.longitude;
     if (driveState?.shift_state) telemetry.shiftState = driveState.shift_state;
     if (driveState?.speed != null) telemetry.speed = driveState.speed;
 
-    console.log(`[Teslemetry] Auto-fetch result: odo=${telemetry.odometer?.toFixed(1)} lat=${telemetry.latitude} lon=${telemetry.longitude} shift=${telemetry.shiftState} speed=${telemetry.speed}`);
+    const chargeState = vehicleData?.charge_state;
+    if (chargeState?.battery_level != null) telemetry.batteryLevel = chargeState.battery_level;
+
+    console.log(`[Teslemetry] Auto-fetch result: odo=${telemetry.odometer?.toFixed(1)} lat=${telemetry.latitude} lon=${telemetry.longitude} shift=${telemetry.shiftState} speed=${telemetry.speed} battery=${telemetry.batteryLevel}`);
   } catch (err: any) {
-    console.log(`[Teslemetry] Auto-fetch failed (car may be asleep): ${err.message?.substring(0, 100)}`);
+    console.log(`[Teslemetry] Auto-fetch failed (car may be asleep): ${err.message?.substring(0, 200)}`);
   }
   return telemetry;
 }
@@ -373,7 +380,8 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
 
   const hasTelemetryData = telemetry.odometer != null || telemetry.shiftState != null || telemetry.latitude != null;
 
-  if (!hasTelemetryData && telemetry.vehicleState && telemetry.vehicleState !== "asleep" && telemetry.vehicleState !== "offline") {
+  if (!hasTelemetryData) {
+    console.log(`[Teslemetry] No telemetry data in webhook (state=${telemetry.vehicleState || "n/a"}, tripInProgress=${connection.tripInProgress}) - auto-fetching via API`);
     telemetry = await autoFetchVehicleData(connection, telemetry);
   }
 
@@ -398,9 +406,11 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
   const speedDetected = telemetry.speed != null && telemetry.speed > 0;
 
   const isDriving = shiftDriving || (!shiftState && (movementDetected || speedDetected));
-  const isParked = shiftParked || (!shiftState && !isDriving);
 
-  console.log(`[Teslemetry] Webhook for VIN=${telemetry.vin} user=${connection.userId} shift=${shiftState || "null"} speed=${telemetry.speed} odo=${odometerKm?.toFixed(1)} lat=${lat} lon=${lon} vehicleState=${telemetry.vehicleState || "n/a"} locMoved=${locationMovedKm.toFixed(3)}km odoMoved=${odometerMovedKm.toFixed(3)}km movement=${movementDetected} isDriving=${isDriving}`);
+  const carOfflineOrAsleep = telemetry.vehicleState === "offline" || telemetry.vehicleState === "asleep";
+  const isParked = shiftParked || carOfflineOrAsleep || (!shiftState && !isDriving);
+
+  console.log(`[Teslemetry] Webhook for VIN=${telemetry.vin} user=${connection.userId} shift=${shiftState || "null"} speed=${telemetry.speed} odo=${odometerKm?.toFixed(1)} lat=${lat} lon=${lon} vehicleState=${telemetry.vehicleState || "n/a"} locMoved=${locationMovedKm.toFixed(3)}km odoMoved=${odometerMovedKm.toFixed(3)}km movement=${movementDetected} isDriving=${isDriving} tripInProgress=${connection.tripInProgress}`);
 
   const updateFields: Record<string, any> = {
     lastPolledAt: new Date(),
@@ -458,6 +468,32 @@ export async function handleTelemetryWebhook(body: any): Promise<{ processed: bo
 
   if (isParked && connection.tripInProgress) {
     const now = new Date();
+
+    if (carOfflineOrAsleep) {
+      console.log(`[Teslemetry Trip] Car went ${telemetry.vehicleState} with trip in progress for user=${connection.userId} - ending trip immediately`);
+      const tripWaypoints: Array<[number, number]> = Array.isArray(connection.routeWaypoints) ? (connection.routeWaypoints as Array<[number, number]>) : [];
+      const endLat = lat ?? (connection.lastLatitude ? Number(connection.lastLatitude) : undefined);
+      const endLon = lon ?? (connection.lastLongitude ? Number(connection.lastLongitude) : undefined);
+      const endOdo = odometerKm ?? (connection.lastOdometer ? Number(connection.lastOdometer) : null);
+      await completeTripFromWebhook(connection, endLat, endLon, endOdo, tripWaypoints);
+      await storage.updateTeslaConnection(connection.id, {
+        ...updateFields,
+        lastPolledAt: now,
+        lastDriveState: "parked",
+        lastShiftState: shiftState || "P",
+        pollState: "awake_idle",
+        tripInProgress: false,
+        tripStartTime: null,
+        tripStartOdometer: null,
+        tripStartLatitude: null,
+        tripStartLongitude: null,
+        tripStartLocation: null,
+        routeWaypoints: null,
+        parkedSince: null,
+        idleSince: new Date(),
+      });
+      return { processed: true, action: "trip_ended_offline" };
+    }
 
     if (!connection.parkedSince) {
       console.log(`[Teslemetry Trip] Parked detected for user=${connection.userId} - starting ${PARKED_CONFIRMATION_MS / 1000}s confirmation`);

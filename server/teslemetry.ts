@@ -422,6 +422,10 @@ export async function ingestTelemetryWebhook(body: any): Promise<{ accepted: boo
 
   const hasTelemetryData = telemetry.odometer != null || telemetry.shiftState != null || telemetry.latitude != null;
 
+  if (!hasTelemetryData) {
+    return { accepted: true };
+  }
+
   try {
     const event = await storage.createTelemetryEvent({
       userId: connection.userId,
@@ -433,7 +437,7 @@ export async function ingestTelemetryWebhook(body: any): Promise<{ accepted: boo
       shiftState: telemetry.shiftState ?? null,
       batteryLevel: telemetry.batteryLevel ?? null,
       vehicleState: telemetry.vehicleState ?? null,
-      source: hasTelemetryData ? "webhook" : "state_only",
+      source: "webhook",
       rawPayload: JSON.stringify(body).length > 5000 ? { _truncated: true, keys: Object.keys(body) } : body,
     });
     console.log(`[Teslemetry Ingest] Stored event ${event.id} for VIN=${telemetry.vin} (shift=${telemetry.shiftState || "null"} state=${telemetry.vehicleState || "n/a"})`);
@@ -486,6 +490,7 @@ export function startTelemetryWorker(): void {
   setInterval(async () => {
     try {
       await cleanupStaleTripConnections();
+      await maybeCleanupTelemetryEvents();
     } catch (err: any) {
       console.error(`[Stale Cleanup] Error: ${err.message}`);
     }
@@ -527,7 +532,6 @@ async function processTelemetryEvents(): Promise<void> {
     }
   }
 
-  maybeCleanupTelemetryEvents();
 }
 
 const GPS_TRIP_END_MS = 3 * 60 * 1000;

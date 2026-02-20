@@ -149,6 +149,10 @@ function extractVin(body: any): string | null {
 }
 
 function parseWebhookPayload(body: any): TelemetryData | null {
+  if (body.connectionId || body.networkInterface) {
+    return null;
+  }
+
   const vin = extractVin(body);
   if (!body || !vin) {
     console.log("[Teslemetry] Webhook: missing VIN in payload");

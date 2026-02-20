@@ -423,6 +423,12 @@ export async function ingestTelemetryWebhook(body: any): Promise<{ accepted: boo
   const hasTelemetryData = telemetry.odometer != null || telemetry.shiftState != null || telemetry.latitude != null;
 
   if (!hasTelemetryData) {
+    if (connection.tripInProgress && (telemetry.vehicleState === "offline" || telemetry.vehicleState === "asleep")) {
+      console.log(`[Teslemetry Ingest] Vehicle went ${telemetry.vehicleState} during trip, ending trip for user=${connection.userId}`);
+      await endTrip(connection, `vehicle_${telemetry.vehicleState}`);
+    } else if (telemetry.vehicleState === "offline" || telemetry.vehicleState === "asleep") {
+      await storage.updateTeslaConnection(connection.id, { lastDriveState: telemetry.vehicleState, lastPolledAt: new Date() });
+    }
     return { accepted: true };
   }
 

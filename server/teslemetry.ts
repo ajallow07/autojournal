@@ -607,23 +607,7 @@ async function endTrip(connection: TeslaConnection, reason: string): Promise<Tes
   const endLat = connection.lastLatitude ? Number(connection.lastLatitude) : undefined;
   const endLon = connection.lastLongitude ? Number(connection.lastLongitude) : undefined;
 
-  let endOdo = connection.lastOdometer ? Number(connection.lastOdometer) : null;
-  try {
-    const token = getTeslemetryToken();
-    if (token && connection.vin) {
-      console.log(`[Trip] Fetching final odometer from Teslemetry API for trip end`);
-      const vehicleData = await fetchTeslemetryVehicleData(connection.vin);
-      const apiOdo = vehicleData?.vehicle_state?.odometer;
-      if (apiOdo != null && apiOdo > 0) {
-        const apiOdoKm = apiOdo * 1.60934;
-        if (endOdo == null || apiOdoKm > endOdo) {
-          endOdo = apiOdoKm;
-        }
-      }
-    }
-  } catch (err: any) {
-    console.log(`[Trip] Could not fetch final odometer: ${err.message?.substring(0, 100)}`);
-  }
+  const endOdo = connection.lastOdometer ? Number(connection.lastOdometer) : null;
 
   await completeTripFromWebhook(connection, endLat, endLon, endOdo, tripWaypoints);
   const updates = {

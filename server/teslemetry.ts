@@ -149,7 +149,7 @@ function extractVin(body: any): string | null {
 }
 
 function parseWebhookPayload(body: any): TelemetryData | null {
-  if (body.connectionId || body.networkInterface) {
+  if (body.connectionId || body.networkInterface || body.alerts) {
     return null;
   }
 

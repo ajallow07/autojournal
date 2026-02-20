@@ -1,0 +1,135 @@
+{
+  "alerts": [
+    {
+      "audiences": [
+        "Customer"
+      ],
+      "clearCondition": "The vehicle is shifted into the Park gear or the passenger and rear doors are detected as closed.",
+      "condition": "The passenger or rear door(s) is detected as open when the vehicle is shifted into the Drive, Reverse, or Neutral gears.",
+      "customerFacingMessage1": "Door open",
+      "customerFacingMessage2": "Proceed with caution",
+      "description": "The passenger or rear door(s) (except for Model X Falcon door(s)) is detected as open when the vehicle is shifted into a gear other than Park, which may lead to the passenger or rear door(s) being open while driving.",
+      "endedAt": "2026-02-19T15:54:59.442Z",
+      "name": "UI_a002_DoorOpen",
+      "potentialImpact": "The passenger or rear door(s) may open while driving.",
+      "startedAt": "2026-02-19T15:54:23.441Z"
+    },
+    {
+      "audiences": [
+        "Customer"
+      ],
+      "clearCondition": "The vehicle is shifted into the Park gear or the passenger and rear doors are detected as closed.",
+      "condition": "The passenger or rear door(s) is detected as open when the vehicle is shifted into the Drive, Reverse, or Neutral gears.",
+      "customerFacingMessage1": "Door open",
+      "customerFacingMessage2": "Proceed with caution",
+      "description": "The passenger or rear door(s) (except for Model X Falcon door(s)) is detected as open when the vehicle is shifted into a gear other than Park, which may lead to the passenger or rear door(s) being open while driving.",
+      "endedAt": "2026-02-19T15:54:21.442Z",
+      "name": "UI_a002_DoorOpen",
+      "potentialImpact": "The passenger or rear door(s) may open while driving.",
+      "startedAt": "2026-02-19T15:54:14.443Z"
+    },
+    {
+      "audiences": [
+        "Customer"
+      ],
+      "clearCondition": "The vehicle is shifted into the Park gear or the passenger and rear doors are detected as closed.",
+      "condition": "The passenger or rear door(s) is detected as open when the vehicle is shifted into the Drive, Reverse, or Neutral gears.",
+      "customerFacingMessage1": "Door open",
+      "customerFacingMessage2": "Proceed with caution",
+      "description": "The passenger or rear door(s) (except for Model X Falcon door(s)) is detected as open when the vehicle is shifted into a gear other than Park, which may lead to the passenger or rear door(s) being open while driving.",
+      "endedAt": "2026-02-19T14:27:46.648Z",
+      "name": "UI_a002_DoorOpen",
+      "potentialImpact": "The passenger or rear door(s) may open while driving.",
+      "startedAt": "2026-02-19T14:27:39.648Z"
+    },
+    {
+      "audiences": [
+        "Customer"
+      ],
+      "clearCondition": "The vehicle is shifted into the Park gear or the passenger and rear doors are detected as closed.",
+      "condition": "The passenger or rear door(s) is detected as open when the vehicle is shifted into the Drive, Reverse, or Neutral gears.",
+      "customerFacingMessage1": "Door open",
+      "customerFacingMessage2": "Proceed with caution",
+      "description": "The passenger or rear door(s) (except for Model X Falcon door(s)) is detected as open when the vehicle is shifted into a gear other than Park, which may lead to the passenger or rear door(s) being open while driving.",
+      "endedAt": "2026-02-19T14:27:37.648Z",
+      "name": "UI_a002_DoorOpen",
+      "potentialImpact": "The passenger or rear door(s) may open while driving.",
+      "startedAt": "2026-02-19T14:27:30.649Z"
+    },
+    {
+      "audiences": [
+        "Customer"
+      ],
+      "clearCondition": "The vehicle is shifted into the Park gear or the passenger and rear doors are detected as closed.",
+      "condition": "The passenger or rear door(s) is detected as open when the vehicle is shifted into the Drive, Reverse, or Neutral gears.",
+      "customerFacingMessage1": "Door open",
+      "customerFacingMessage2": "Proceed with caution",
+      "description": "The passenger or rear door(s) (except for Model X Falcon door(s)) is detected as open when the vehicle is shifted into a gear other than Park, which may lead to the passenger or rear door(s) being open while driving.",
+      "endedAt": "2026-02-19T14:10:14.648Z",
+      "name": "UI_a002_DoorOpen",
+      "potentialImpact": "The passenger or rear door(s) may open while driving.",
+      "startedAt": "2026-02-19T14:10:08.650Z"
+    },
+    {
+      "audiences": [
+        "Customer"
+      ],
+      "clearCondition": "The vehicle is shifted into the Park gear or the passenger and rear doors are detected as closed.",
+      "condition": "The passenger or rear door(s) is detected as open when the vehicle is shifted into the Drive, Reverse, or Neutral gears.",
+      "customerFacingMessage1": "Door open",
+      "customerFacingMessage2": "Proceed with caution",
+      "description": "The passenger or rear door(s) (except for Model X Falcon door(s)) is detected as open when the vehicle is shifted into a gear other than Park, which may lead to the passenger or rear door(s) being open while driving.",
+      "endedAt": "2026-02-19T14:06:09.649Z",
+      "name": "UI_a002_DoorOpen",
+      "potentialImpact": "The passenger or rear door(s) may open while driving.",
+      "startedAt": "2026-02-19T14:06:02.649Z"
+    },
+    {
+      "audiences": [
+        "Customer",
+        "Service"
+      ],
+      "clearCondition": "Charge handle proximity is no longer detected as connected to the charge port (CP) without charge handle button pressed, or control pilot signal is no longer detected in state B1. Clears after five seconds if either of these conditions is true and a charge cable is still present. Otherwise, clears immediately.",
+      "condition": "Charge handle proximity is detected as connected to the charge port (CP) without charge handle button pressed, and control pilot signal is detected in state B1  for more than five seconds.",
+      "customerFacingMessage1": "Charging equipment not ready",
+      "customerFacingMessage2": "See equipment instructions to start charging",
+      "description": "Control pilot signal remains in state B1, indicating the charge station is connected to the vehicle but is not ready to charge the vehicle, for too long while a charge cable is plugged into the charge port (CP). Charging may not start or may be interrupted unexpectedly.",
+      "endedAt": "2026-02-19T07:42:00.778Z",
+      "name": "CP_a066_proxLatchedIdlePilot",
+      "potentialImpact": "Charging may not start or may be interrupted unexpectedly.",
+      "startedAt": "2026-02-19T07:41:52.779Z"
+    },
+    {
+      "audiences": [
+        "Customer",
+        "Service"
+      ],
+      "clearCondition": "The charge handle is unplugged, or proximity with either a control pilot signal or digital communications is detected.",
+      "condition": "Proximity is detected with no control pilot signal and no digital communications, and the vehicle is not charging.",
+      "customerFacingMessage1": "Unable to charge - Charge station not powered",
+      "customerFacingMessage2": "Check power source or try a different station",
+      "description": "The charge port (CP) has detected a missing control pilot signal while a charge cable is connected, which usually indicates the charge station does not have power. Charging may not start, and it may be necessary to try a different charge station.",
+      "endedAt": "2026-02-19T07:41:51.779Z",
+      "name": "CP_a053_proxLatchedNoPilot",
+      "potentialImpact": "Charging may not start.",
+      "startedAt": "2026-02-19T07:40:17.778Z"
+    },
+    {
+      "audiences": [
+        "Customer",
+        "Service"
+      ],
+      "clearCondition": "The alert will clear automatically.",
+      "condition": "Hands off the steering wheel detected and vehicle begins to depart lane.",
+      "customerFacingMessage1": "Take control immediately",
+      "customerFacingMessage2": "Vehicle departing lane",
+      "description": "The Autopilot electronic control unit (ECU) detects a lane departure event, sending an escalated Lane Departure Warning (LDW) alert for human intervention.",
+      "endedAt": "2026-02-19T07:30:37.778Z",
+      "name": "APP_w073_issueEscalatedLDW",
+      "potentialImpact": "Visual and audible warning is issued to the driver to take control immediately to avoid the lane departure.",
+      "startedAt": "2026-02-19T07:30:31.779Z"
+    }
+  ],
+  "createdAt": "2026-02-20T21:28:22.802Z",
+  "vin": "XP7YGCEK2RB503164"
+}

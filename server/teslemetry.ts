@@ -540,6 +540,13 @@ async function processOneEvent(ev: any, connection: TeslaConnection): Promise<Te
     await updateVehicleFromTelemetry(connection, odometerKm, ev.batteryLevel ?? null);
   }
 
+  if (connection.tripInProgress && ev.shiftState === "P") {
+    await storage.updateTeslaConnection(connection.id, updateFields);
+    const updatedConnection = { ...connection, ...updateFields } as TeslaConnection;
+    console.log(`[Trip] Vehicle shifted to Park, ending trip for user=${connection.userId}`);
+    return await endTrip(updatedConnection, "shifted_to_park");
+  }
+
   let movedMeters = 0;
   if (hasGps && connection.lastLatitude != null && connection.lastLongitude != null) {
     movedMeters = haversineDistance(connection.lastLatitude, connection.lastLongitude, lat!, lon!);

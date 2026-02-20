@@ -1,0 +1,50 @@
+Ah, that makes perfect sense! If no new trips are being logged to your app, it means the trips are starting successfully but they are getting permanently stuck "in progress" and never saving to the database.
+
+Looking closely at your processOneEvent function in teslemetry.ts, I can see exactly why this is happening.
+
+The Missing "Park" Logic
+Right now, your code relies on two things to end a trip:
+
+A GPS Timeout: If it receives an empty payload and hasn't seen GPS data for 3 minutes.
+
+A Stale Trip Limit: If the trip has been running for over 12 hours.
+
+Because your Teslemetry dashboard is configured to send Location data every 10 seconds, your app constantly receives GPS coordinates while the car is awake. Therefore, the 3-minute GPS timeout never triggers.
+
+When you park the car, Tesla's Fleet Telemetry instantly fires off a webhook payload indicating the ShiftState changed to "P" (Park). However, your code never actually checks for this "P" state! It just keeps appending the parked GPS coordinates to the route and hardcoding lastDriveState: "driving" indefinitely.
+
+The Fix
+We need to add a few lines of code to explicitly intercept that "P" shift state and tell the app to finalize the trip.
+
+Open teslemetry.ts, locate the processOneEvent function, and add the new code block shown below right after the updateVehicleFromTelemetry check:
+
+TypeScript
+  const now = new Date();
+  const updateFields: Record<string, any> = { lastPolledAt: now };
+  if (odometerKm != null) updateFields.lastOdometer = odometerKm;
+  if (lat != null) updateFields.lastLatitude = lat;
+  if (lon != null) updateFields.lastLongitude = lon;
+  if (hasGps) updateFields.lastGpsAt = now;
+
+  if (odometerKm != null || ev.batteryLevel != null) {
+    await updateVehicleFromTelemetry(connection, odometerKm, ev.batteryLevel ?? null);
+  }
+
+  // --- BEGIN NEW CODE ---
+  // Tesla Fleet Telemetry pushes the new ShiftState instantly when the vehicle parks
+  const isParked = ev.shiftState === "P" || ev.shiftState === "";
+  
+  if (connection.tripInProgress && isParked) {
+    // Save the final GPS points and odometer to the connection before finalizing
+    await storage.updateTeslaConnection(connection.id, updateFields);
+    const updatedConnection = { ...connection, ...updateFields } as TeslaConnection;
+    
+    console.log(`[Trip] Vehicle shifted to Park, ending trip for user=${connection.userId}`);
+    return await endTrip(updatedConnection, "shifted_to_park");
+  }
+  // --- END NEW CODE ---
+
+  let movedMeters = 0;
+  if (hasGps && connection.lastLatitude != null && connection.lastLongitude != null) {
+Why this works:
+Tesla's Fleet Telemetry relies on change-based streaming. The moment you shift from Drive to Park, a webhook is fired containing ShiftState: "P". This new code catches that exact payload, grabs the final odometerKm and latitude/longitude values so your database is perfectly accurate, and calls endTrip() immediately to log the completed trip.

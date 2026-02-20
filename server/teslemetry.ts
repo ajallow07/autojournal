@@ -15,7 +15,7 @@ async function maybeCleanupTelemetryEvents() {
   try {
     const deleted = await storage.cleanupOldTelemetryEvents();
     if (deleted > 0) {
-      console.log(`[Teslemetry] Cleaned up ${deleted} telemetry events older than 24h`);
+      console.log(`[Teslemetry] Cleaned up ${deleted} telemetry events older than 2h`);
     }
   } catch (err: any) {
     console.log(`[Teslemetry] Cleanup error: ${err.message}`);

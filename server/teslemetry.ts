@@ -447,6 +447,28 @@ export async function ingestTelemetryWebhook(body: any): Promise<{ accepted: boo
 let workerRunning = false;
 const WORKER_INTERVAL_MS = 5000;
 
+const STALE_CLEANUP_INTERVAL_MS = 2 * 60 * 1000;
+
+async function cleanupStaleTripConnections(): Promise<void> {
+  const connections = await storage.getAllActiveTeslaConnections();
+  const now = Date.now();
+  for (const conn of connections) {
+    if (!conn.tripInProgress) continue;
+    const lastGps = conn.lastGpsAt ? new Date(conn.lastGpsAt).getTime() : 0;
+    const tripStart = conn.tripStartTime ? new Date(conn.tripStartTime).getTime() : 0;
+    const gpsAge = lastGps > 0 ? now - lastGps : Infinity;
+    const tripAge = tripStart > 0 ? now - tripStart : 0;
+
+    if (gpsAge >= GPS_TRIP_END_MS) {
+      console.log(`[Stale Cleanup] GPS silent ${Math.round(gpsAge / 1000)}s, ending trip for user=${conn.userId}`);
+      await endTrip(conn, "stale_cleanup_gps_timeout");
+    } else if (tripAge > STALE_TRIP_MS) {
+      console.log(`[Stale Cleanup] Trip running ${Math.round(tripAge / 3600000)}h, force-closing for user=${conn.userId}`);
+      await endTrip(conn, "stale_cleanup_age");
+    }
+  }
+}
+
 export function startTelemetryWorker(): void {
   console.log(`[Teslemetry Worker] Starting background worker (interval=${WORKER_INTERVAL_MS}ms)`);
   setInterval(async () => {
@@ -460,6 +482,14 @@ export function startTelemetryWorker(): void {
       workerRunning = false;
     }
   }, WORKER_INTERVAL_MS);
+
+  setInterval(async () => {
+    try {
+      await cleanupStaleTripConnections();
+    } catch (err: any) {
+      console.error(`[Stale Cleanup] Error: ${err.message}`);
+    }
+  }, STALE_CLEANUP_INTERVAL_MS);
 }
 
 async function processTelemetryEvents(): Promise<void> {

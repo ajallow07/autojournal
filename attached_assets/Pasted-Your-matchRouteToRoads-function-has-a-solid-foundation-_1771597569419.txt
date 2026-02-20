@@ -1,0 +1,24 @@
+Your matchRouteToRoads function has a solid foundation for handling coordinates and fetching data, but there is a major architectural flaw in how it queries the OSRM server that will result in highly inaccurate mapped routes for your trips.
+
+Here is a review of the issues and the exact code replacement you need to fix them.
+
+1. The Wrong API Endpoint (/route vs. /match)
+Currently, your code uses the /route/v1/driving/ endpoint.
+
+The Problem: The /route endpoint is designed strictly to find the most optimal path between a set of waypoints based on routing weights like distance or duration. If you took a scenic detour through a neighborhood, the routing engine will completely ignore your path and draw a line down the nearby highway because it calculates that as the faster route.
+
+The Solution: OSRM has a dedicated Map Matching API (/match/v1/driving/). Instead of calculating the fastest route, it uses a Hidden Markov Model (HMM) and the Viterbi algorithm to analyze your noisy GPS trace and snap it to the exact physical road segments you actually drove on.
+
+2. Aggressive Downsampling
+You are currently downsampling the trip to a maximum of 10 waypoints via downsampleWaypoints(waypoints, 10).
+
+The Problem: Compressing an entire drive into just 10 sparse points leaves massive geographical gaps.
+
+The Solution: The public OSRM matching engine can handle significantly more points, with examples commonly utilizing up to 100 coordinates per request. You should increase your downsampling limit to 100 to feed the map-matching algorithm enough data to accurately reconstruct the turns in your route.
+
+3. Missing Search Radiuses
+GPS coordinates inherently drift, especially when driving under bridges, near tall buildings, or underground.
+
+The Problem: If your Tesla's GPS bounced slightly away from the road, the algorithm might fail to connect the segment.
+
+The Solution: You must supply a radiuses parameter in the URL (e.g., setting a 50-meter search radius for every point) to tell the engine to find the nearest candidate road segments within that radius, making it forgiving of standard GPS drift.

@@ -94,36 +94,42 @@ export async function matchRouteToRoads(
   if (!waypoints || waypoints.length < 2) return null;
 
   try {
-    const sampled = downsampleWaypoints(waypoints, 10);
+    const sampled = downsampleWaypoints(waypoints, 100);
     const coords = sampled.map(([lat, lon]) => `${lon},${lat}`).join(";");
-    const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
+    const radiuses = sampled.map(() => "50").join(";");
+    const url = `https://router.project-osrm.org/match/v1/driving/${coords}?overview=full&geometries=geojson&radiuses=${radiuses}`;
 
     const res = await fetch(url, {
       headers: { "User-Agent": "MahlisAutoJournal/1.0" },
     });
 
     if (!res.ok) {
-      console.log(`[OSRM] Route failed: HTTP ${res.status}`);
+      console.log(`[OSRM] Match failed: HTTP ${res.status}`);
       return null;
     }
 
     const data = await res.json();
-    if (data.code !== "Ok" || !data.routes || data.routes.length === 0) {
-      console.log(`[OSRM] No route found: ${data.code}`);
+    if (data.code !== "Ok" || !data.matchings || data.matchings.length === 0) {
+      console.log(`[OSRM] No match found: ${data.code}`);
       return null;
     }
 
-    const geom = data.routes[0].geometry;
-    if (!geom?.coordinates || geom.coordinates.length < 2) return null;
+    const allCoords: Array<[number, number]> = [];
+    for (const matching of data.matchings) {
+      const geom = matching.geometry;
+      if (geom?.coordinates) {
+        for (const [lon, lat] of geom.coordinates) {
+          allCoords.push([lat, lon]);
+        }
+      }
+    }
 
-    const allCoords: Array<[number, number]> = geom.coordinates.map(
-      ([lon, lat]: [number, number]) => [lat, lon] as [number, number]
-    );
+    if (allCoords.length < 2) return null;
 
-    console.log(`[OSRM] Matched route: ${waypoints.length} raw points -> ${allCoords.length} road-snapped points`);
+    console.log(`[OSRM] Matched route: ${waypoints.length} raw -> ${sampled.length} sampled -> ${allCoords.length} road-snapped points`);
     return allCoords;
   } catch (err: any) {
-    console.log(`[OSRM] Route error: ${err.message}`);
+    console.log(`[OSRM] Match error: ${err.message}`);
     return null;
   }
 }

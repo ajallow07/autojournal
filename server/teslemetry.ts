@@ -97,7 +97,7 @@ export async function matchRouteToRoads(
     const sampled = downsampleWaypoints(waypoints, 100);
     const coords = sampled.map(([lat, lon]) => `${lon},${lat}`).join(";");
     const radiuses = sampled.map(() => "50").join(";");
-    const url = `https://router.project-osrm.org/match/v1/driving/${coords}?overview=full&geometries=geojson&radiuses=${radiuses}`;
+    const url = `https://router.project-osrm.org/match/v1/driving/${coords}?overview=full&geometries=geojson&radiuses=${radiuses}&tidy=true`;
 
     const res = await fetch(url, {
       headers: { "User-Agent": "MahlisAutoJournal/1.0" },
@@ -114,19 +114,14 @@ export async function matchRouteToRoads(
       return null;
     }
 
-    const allCoords: Array<[number, number]> = [];
-    for (const matching of data.matchings) {
-      const geom = matching.geometry;
-      if (geom?.coordinates) {
-        for (const [lon, lat] of geom.coordinates) {
-          allCoords.push([lat, lon]);
-        }
-      }
-    }
+    const geom = data.matchings[0].geometry;
+    if (!geom?.coordinates || geom.coordinates.length < 2) return null;
 
-    if (allCoords.length < 2) return null;
+    const allCoords: Array<[number, number]> = geom.coordinates.map(
+      ([lon, lat]: [number, number]) => [lat, lon] as [number, number]
+    );
 
-    console.log(`[OSRM] Matched route: ${waypoints.length} raw -> ${sampled.length} sampled -> ${allCoords.length} road-snapped points`);
+    console.log(`[OSRM] Matched trace: ${waypoints.length} raw -> ${sampled.length} sampled -> ${allCoords.length} road-snapped points`);
     return allCoords;
   } catch (err: any) {
     console.log(`[OSRM] Match error: ${err.message}`);

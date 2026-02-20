@@ -1,0 +1,51 @@
+export async function matchRouteToRoads(
+  waypoints: Array<[number, number]>,
+): Promise<Array<[number, number]> | null> {
+  if (!waypoints || waypoints.length < 2) return null;
+
+  try {
+    // 1. Increase downsampling limit to 100 for higher fidelity traces
+    const sampled = downsampleWaypoints(waypoints, 100);
+    
+    // OSRM expects longitude,latitude
+    const coords = sampled.map(([lat, lon]) => `${lon},${lat}`).join(";");
+    
+    // 2. Generate an array of radiuses (50 meters) for each coordinate to handle GPS drift
+    const radiuses = sampled.map(() => "50").join(";");
+    
+    // 3. Switch to the Map Matching API endpoint and pass the radiuses
+    const url = `https://router.project-osrm.org/match/v1/driving/${coords}?overview=full&geometries=geojson&radiuses=${radiuses}&tidy=true`;
+
+    const res = await fetch(url, {
+      headers: { "User-Agent": "MahlisAutoJournal/1.0" },
+    });
+
+    if (!res.ok) {
+      console.log(`[OSRM] Match failed: HTTP ${res.status}`);
+      return null;
+    }
+
+    const data = await res.json();
+    
+    // The match API returns 'matchings' instead of 'routes'
+    if (data.code !== "Ok" || !data.matchings || data.matchings.length === 0) {
+      console.log(`[OSRM] No match found: ${data.code}`);
+      return null;
+    }
+
+    // Grab the first matched geometry (the highest probability continuous match)
+    const geom = data.matchings[0].geometry;
+    if (!geom?.coordinates || geom.coordinates.length < 2) return null;
+
+    // Convert back from [longitude, latitude] to [latitude, longitude] for your frontend
+    const allCoords: Array<[number, number]> = geom.coordinates.map(
+      ([lon, lat]: [number, number]) => [lat, lon] as [number, number]
+    );
+
+    console.log(`[OSRM] Matched trace: ${waypoints.length} raw points -> ${allCoords.length} road-snapped points`);
+    return allCoords;
+  } catch (err: any) {
+    console.log(`[OSRM] Match error: ${err.message}`);
+    return null;
+  }
+}

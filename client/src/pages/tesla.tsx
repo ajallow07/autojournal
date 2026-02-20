@@ -279,7 +279,7 @@ function TeslaConnectionCard() {
               {conn.tripStartLocation && (
                 <p className="text-xs text-muted-foreground">
                   From: {conn.tripStartLocation}
-                  {conn.tripStartTime && ` (started ${new Date(conn.tripStartTime).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })})`}
+                  {conn.tripStartTime && ` (started ${new Date(conn.tripStartTime).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" })} UTC)`}
                 </p>
               )}
             </div>
@@ -351,7 +351,7 @@ function TeslaConnectionCard() {
 
         <div className="text-xs text-muted-foreground space-y-0.5">
           {conn.lastPolledAt && (
-            <p>Last updated: {new Date(conn.lastPolledAt).toLocaleString("sv-SE")}</p>
+            <p>Last updated: {new Date(conn.lastPolledAt).toLocaleString("sv-SE", { timeZone: "UTC" })} UTC</p>
           )}
           <p>Real-time data via Teslemetry webhooks. Configure the webhook URL above in your Teslemetry dashboard to receive automatic trip updates.</p>
         </div>
@@ -795,7 +795,7 @@ function TelemetryLog() {
                     <tr key={ev.id} className="border-t">
                       <td className="p-2 whitespace-nowrap">
                         {new Date(ev.createdAt).toLocaleString("sv-SE", {
-                          month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit",
+                          month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC",
                         })}
                       </td>
                       <td className="p-2">

@@ -70,7 +70,7 @@ export default function ProfilePage() {
                 <div>
                   <p className="text-xs text-muted-foreground">Member since</p>
                   <p className="text-sm font-medium">
-                    {new Date(user.createdAt).toLocaleDateString("sv-SE")}
+                    {new Date(user.createdAt).toLocaleDateString("sv-SE", { timeZone: "UTC" })}
                   </p>
                 </div>
               </div>

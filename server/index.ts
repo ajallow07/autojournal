@@ -29,6 +29,7 @@ export function log(message: string, source = "express") {
     minute: "2-digit",
     second: "2-digit",
     hour12: true,
+    timeZone: "UTC",
   });
 
   console.log(`${formattedTime} [${source}] ${message}`);

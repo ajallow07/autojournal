@@ -358,8 +358,8 @@ async function completeTripFromWebhook(
         userId: connection.userId,
         vehicleId: linkedVehicle.id,
         date: now.toISOString().split("T")[0],
-        startTime: startTime.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" }),
-        endTime: now.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" }),
+        startTime: startTime.toISOString().slice(11, 16),
+        endTime: now.toISOString().slice(11, 16),
         startLocation: connection.tripStartLocation || "Unknown",
         endLocation: endLocationName,
         startOdometer: Math.round(startOdo * 10) / 10,
@@ -860,13 +860,13 @@ export async function reconstructTripsFromTelemetry(userId: string, vin: string,
     }
 
     if (distance == null || distance < MIN_DISTANCE_KM) {
-      details.push(`Skipped segment ${seg.startTime.toLocaleTimeString("sv-SE")} - too short (${distance?.toFixed(2) || "unknown"} km)`);
+      details.push(`Skipped segment ${seg.startTime.toISOString().slice(11, 19)} - too short (${distance?.toFixed(2) || "unknown"} km)`);
       continue;
     }
 
     const segDate = seg.startTime.toISOString().split("T")[0];
-    const segStartHHMM = seg.startTime.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
-    const segEndHHMM = seg.endTime.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+    const segStartHHMM = seg.startTime.toISOString().slice(11, 16);
+    const segEndHHMM = seg.endTime.toISOString().slice(11, 16);
 
     const isDuplicate = existingTrips.some(t => {
       if (t.vehicleId !== linkedVehicle.id || t.date !== segDate) return false;

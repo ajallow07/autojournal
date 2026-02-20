@@ -200,7 +200,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async cleanupOldTelemetryEvents(): Promise<number> {
-    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const cutoff = new Date(Date.now() - 2 * 60 * 60 * 1000);
     const deleted = await db.delete(telemetryEvents)
       .where(lt(telemetryEvents.createdAt, cutoff))
       .returning({ id: telemetryEvents.id });

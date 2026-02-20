@@ -28,7 +28,6 @@ const navItems = [
 
 const settingsItems = [
   { title: "Vehicles", url: "/vehicle", icon: Car },
-  { title: "Profile", url: "/profile", icon: User },
 ];
 
 function TeslaStatusIndicator() {
@@ -147,6 +146,18 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               )}
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={location.startsWith("/profile")}
+                  data-testid="nav-profile"
+                >
+                  <Link href="/profile" onClick={() => setOpenMobile(false)}>
+                    <User className="w-4 h-4" />
+                    <span>Profile</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

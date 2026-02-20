@@ -2,7 +2,6 @@ import { storage } from "./storage";
 import type { TeslaConnection, Geofence } from "@shared/schema";
 
 const TESLEMETRY_API_BASE = "https://api.teslemetry.com";
-const PARKED_CONFIRMATION_MS = 120000;
 const MIN_DISTANCE_KM = 0.1;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 const STALE_TRIP_MS = 12 * 60 * 60 * 1000;
@@ -394,34 +393,6 @@ async function completeTripFromWebhook(
   }
 }
 
-async function autoFetchVehicleData(connection: TeslaConnection, telemetry: TelemetryData): Promise<TelemetryData> {
-  try {
-    const token = getTeslemetryToken();
-    if (!token) return telemetry;
-
-    console.log(`[Teslemetry] Auto-fetching vehicle data for VIN=${telemetry.vin} (state=${telemetry.vehicleState}, tripInProgress=${connection.tripInProgress})`);
-    const vehicleData = await fetchTeslemetryVehicleData(telemetry.vin);
-    const driveState = vehicleData?.drive_state;
-    const vehicleStateData = vehicleData?.vehicle_state;
-
-    if (vehicleStateData?.odometer != null && vehicleStateData.odometer > 0) {
-      telemetry.odometer = vehicleStateData.odometer * 1.60934;
-    }
-    if (driveState?.latitude != null) telemetry.latitude = driveState.latitude;
-    if (driveState?.longitude != null) telemetry.longitude = driveState.longitude;
-    if (driveState?.shift_state) telemetry.shiftState = driveState.shift_state;
-    if (driveState?.speed != null) telemetry.speed = driveState.speed;
-
-    const chargeState = vehicleData?.charge_state;
-    if (chargeState?.battery_level != null) telemetry.batteryLevel = chargeState.battery_level;
-
-    console.log(`[Teslemetry] Auto-fetch result: odo=${telemetry.odometer?.toFixed(1)} lat=${telemetry.latitude} lon=${telemetry.longitude} shift=${telemetry.shiftState} speed=${telemetry.speed} battery=${telemetry.batteryLevel}`);
-  } catch (err: any) {
-    console.log(`[Teslemetry] Auto-fetch failed (car may be asleep): ${err.message?.substring(0, 200)}`);
-  }
-  return telemetry;
-}
-
 async function updateVehicleFromTelemetry(connection: TeslaConnection, odometerKm: number | null, batteryLevel: number | null) {
   if (!connection.vehicleId) return;
   try {
@@ -535,240 +506,143 @@ async function processTelemetryEvents(): Promise<void> {
   maybeCleanupTelemetryEvents();
 }
 
-const GPS_STALE_MS = 5 * 60 * 1000;
+const GPS_TRIP_END_MS = 3 * 60 * 1000;
 
 async function processOneEvent(ev: any, connection: TeslaConnection): Promise<TeslaConnection> {
-  let telemetry: TelemetryData = {
-    vin: ev.vin,
-    createdAt: ev.createdAt?.toISOString() || new Date().toISOString(),
-    latitude: ev.latitude,
-    longitude: ev.longitude,
-    odometer: ev.odometer,
-    speed: ev.speed,
-    shiftState: ev.shiftState,
-    batteryLevel: ev.batteryLevel,
-    vehicleState: ev.vehicleState,
-  };
+  const lat = ev.latitude != null ? Number(ev.latitude) : undefined;
+  const lon = ev.longitude != null ? Number(ev.longitude) : undefined;
+  const odometerKm = ev.odometer != null ? Number(ev.odometer) : null;
+  const hasGps = lat != null && lon != null;
+  const isStateOnly = !hasGps && odometerKm == null && ev.shiftState == null;
 
-  const hasRealGps = telemetry.latitude != null && telemetry.longitude != null;
-  const hasTelemetryData = telemetry.odometer != null || telemetry.shiftState != null || hasRealGps;
-  const isStateOnly = !hasTelemetryData;
+  if (isStateOnly) {
+    if (connection.tripInProgress && connection.lastGpsAt) {
+      const eventTime = ev.createdAt ? new Date(ev.createdAt).getTime() : Date.now();
+      const lastGpsTime = new Date(connection.lastGpsAt).getTime();
+      const gpsAgeSec = Math.round((eventTime - lastGpsTime) / 1000);
 
-  if (isStateOnly && telemetry.vehicleState === "offline" && connection.tripInProgress) {
-    const lastGps = connection.lastGpsAt ? new Date(connection.lastGpsAt).getTime() : 0;
-    const eventTime = ev.createdAt ? new Date(ev.createdAt).getTime() : Date.now();
-    const gpsStaleSec = lastGps > 0 ? Math.round((eventTime - lastGps) / 1000) : -1;
-
-    if (gpsStaleSec >= 0 && gpsStaleSec < GPS_STALE_MS / 1000) {
-      console.log(`[Teslemetry Worker] State-only offline event ${ev.id} - trip in progress, last GPS ${gpsStaleSec}s ago - SKIPPING (waiting for GPS timeout)`);
-      return connection;
+      if (gpsAgeSec >= GPS_TRIP_END_MS / 1000) {
+        console.log(`[Trip] GPS stale ${gpsAgeSec}s, ending trip for user=${connection.userId}`);
+        return await endTrip(connection, "gps_timeout");
+      }
     }
-
-    if (gpsStaleSec >= GPS_STALE_MS / 1000) {
-      console.log(`[Teslemetry Worker] State-only offline event ${ev.id} - trip in progress, GPS stale ${gpsStaleSec}s - ending trip`);
-      const tripWaypoints: Array<[number, number]> = Array.isArray(connection.routeWaypoints) ? (connection.routeWaypoints as Array<[number, number]>) : [];
-      const endLat = connection.lastLatitude ? Number(connection.lastLatitude) : undefined;
-      const endLon = connection.lastLongitude ? Number(connection.lastLongitude) : undefined;
-      const endOdo = connection.lastOdometer ? Number(connection.lastOdometer) : null;
-      await completeTripFromWebhook(connection, endLat, endLon, endOdo, tripWaypoints);
-      const updates = {
-        lastPolledAt: new Date(),
-        lastDriveState: "parked",
-        lastShiftState: "P",
-        pollState: "awake_idle",
-        tripInProgress: false,
-        tripStartTime: null,
-        tripStartOdometer: null,
-        tripStartLatitude: null,
-        tripStartLongitude: null,
-        tripStartLocation: null,
-        routeWaypoints: null,
-        parkedSince: null,
-        idleSince: new Date(),
-      };
-      await storage.updateTeslaConnection(connection.id, updates);
-      return { ...connection, ...updates, tripInProgress: false } as TeslaConnection;
-    }
-  }
-
-  if (isStateOnly && !connection.tripInProgress) {
-    console.log(`[Teslemetry Worker] State-only event ${ev.id} (state=${telemetry.vehicleState || "n/a"}) - no trip, skipping`);
     return connection;
   }
 
-  if (isStateOnly && connection.tripInProgress) {
-    console.log(`[Teslemetry Worker] State-only event ${ev.id} (state=${telemetry.vehicleState || "n/a"}) - trip in progress, skipping`);
-    return connection;
-  }
-
-  const odometerKm = telemetry.odometer ?? null;
-  const lat = telemetry.latitude ?? undefined;
-  const lon = telemetry.longitude ?? undefined;
-  const shiftState = telemetry.shiftState;
-
-  const shiftDriving = shiftState === "D" || shiftState === "R" || shiftState === "N";
-  const shiftParked = shiftState === "P" || shiftState === "SNA";
-
-  let locationMovedKm = 0;
-  if (lat && lon && connection.lastLatitude && connection.lastLongitude) {
-    locationMovedKm = haversineDistance(connection.lastLatitude, connection.lastLongitude, lat, lon) / 1000;
-  }
-  let odometerMovedKm = 0;
-  if (odometerKm != null && connection.lastOdometer != null && connection.lastOdometer > 0) {
-    odometerMovedKm = odometerKm - connection.lastOdometer;
-  }
-
-  const movementDetected = locationMovedKm > 0.03 || odometerMovedKm > 0.05;
-  const speedDetected = telemetry.speed != null && telemetry.speed > 0;
-
-  const isDriving = shiftDriving || movementDetected || speedDetected || (connection.tripInProgress && hasRealGps);
-  const isParked = shiftParked || (!isDriving && !connection.tripInProgress);
-
-  console.log(`[Teslemetry Worker] Processing event ${ev.id} VIN=${ev.vin} user=${connection.userId} shift=${shiftState || "null"} speed=${telemetry.speed} odo=${odometerKm?.toFixed(1)} lat=${lat} lon=${lon} state=${telemetry.vehicleState || "n/a"} moved=${locationMovedKm.toFixed(3)}km isDriving=${isDriving} tripInProgress=${connection.tripInProgress}`);
-
-  const updateFields: Record<string, any> = {
-    lastPolledAt: new Date(),
-  };
+  const now = new Date();
+  const updateFields: Record<string, any> = { lastPolledAt: now };
   if (odometerKm != null) updateFields.lastOdometer = odometerKm;
   if (lat != null) updateFields.lastLatitude = lat;
   if (lon != null) updateFields.lastLongitude = lon;
-  if (shiftState != null) updateFields.lastShiftState = shiftState;
-  if (hasRealGps) updateFields.lastGpsAt = new Date();
+  if (hasGps) updateFields.lastGpsAt = now;
 
-  if (odometerKm != null || telemetry.batteryLevel != null) {
-    await updateVehicleFromTelemetry(connection, odometerKm, telemetry.batteryLevel ?? null);
+  if (odometerKm != null || ev.batteryLevel != null) {
+    await updateVehicleFromTelemetry(connection, odometerKm, ev.batteryLevel ?? null);
+  }
+
+  let movedMeters = 0;
+  if (hasGps && connection.lastLatitude != null && connection.lastLongitude != null) {
+    movedMeters = haversineDistance(connection.lastLatitude, connection.lastLongitude, lat!, lon!);
   }
 
   if (connection.tripInProgress && connection.tripStartTime) {
     const eventTime = ev.createdAt ? new Date(ev.createdAt).getTime() : Date.now();
     const tripAge = eventTime - new Date(connection.tripStartTime).getTime();
     if (tripAge > STALE_TRIP_MS) {
-      console.log(`[Teslemetry Trip] STALE trip detected for user=${connection.userId} (${Math.round(tripAge / 3600000)}h old) - auto-closing`);
-      const tripWaypoints: Array<[number, number]> = Array.isArray(connection.routeWaypoints) ? (connection.routeWaypoints as Array<[number, number]>) : [];
-      const endLat = connection.lastLatitude ? Number(connection.lastLatitude) : undefined;
-      const endLon = connection.lastLongitude ? Number(connection.lastLongitude) : undefined;
-      const endOdo = connection.lastOdometer ? Number(connection.lastOdometer) : null;
-      await completeTripFromWebhook(connection, endLat, endLon, endOdo, tripWaypoints);
-      const staleUpdates = {
-        lastDriveState: "parked",
-        pollState: "awake_idle",
-        tripInProgress: false,
-        tripStartTime: null,
-        tripStartOdometer: null,
-        tripStartLatitude: null,
-        tripStartLongitude: null,
-        tripStartLocation: null,
-        routeWaypoints: null,
-        parkedSince: null,
-        idleSince: new Date(),
-      };
-      await storage.updateTeslaConnection(connection.id, staleUpdates);
-      connection = { ...connection, ...staleUpdates, tripInProgress: false } as TeslaConnection;
-      console.log(`[Teslemetry Trip] Stale trip auto-closed for user=${connection.userId}`);
+      console.log(`[Trip] STALE trip (${Math.round(tripAge / 3600000)}h) for user=${connection.userId} - auto-closing`);
+      return await endTrip(connection, "stale");
     }
   }
 
-  if (isDriving && !connection.tripInProgress) {
-    const locationName = lat && lon ? await reverseGeocode(lat, lon) : "Unknown";
-    const initialWaypoints: Array<[number, number]> = [];
-    if (lat && lon) initialWaypoints.push([lat, lon]);
-    const updates = {
-      ...updateFields,
-      lastDriveState: "driving",
-      pollState: "active_trip",
-      tripInProgress: true,
-      tripStartTime: new Date(),
-      tripStartOdometer: odometerKm,
-      tripStartLatitude: lat ?? null,
-      tripStartLongitude: lon ?? null,
-      tripStartLocation: locationName,
-      routeWaypoints: initialWaypoints,
-      parkedSince: null,
-      idleSince: null,
-      consecutiveErrors: 0,
-      lastApiErrorAt: null,
-    };
-    await storage.updateTeslaConnection(connection.id, updates);
-    console.log(`[Teslemetry Trip] STARTED for user=${connection.userId} at ${locationName} odo=${odometerKm?.toFixed(1)}`);
-    return { ...connection, ...updates, tripInProgress: true } as TeslaConnection;
-  }
-
-  if (isDriving && connection.tripInProgress) {
-    const existingWaypoints: Array<[number, number]> = Array.isArray(connection.routeWaypoints) ? (connection.routeWaypoints as Array<[number, number]>) : [];
-    if (lat && lon) {
-      const lastWp = existingWaypoints[existingWaypoints.length - 1];
-      if (!lastWp || haversineDistance(lastWp[0], lastWp[1], lat, lon) > 20) {
-        existingWaypoints.push([lat, lon]);
-      }
-    }
-    const updates = {
-      ...updateFields,
-      lastDriveState: "driving",
-      parkedSince: null,
-      routeWaypoints: existingWaypoints,
-    };
-    await storage.updateTeslaConnection(connection.id, updates);
-    return { ...connection, ...updates } as TeslaConnection;
-  }
-
-  if (isParked && connection.tripInProgress) {
-    const now = new Date();
-
-    if (!connection.parkedSince) {
-      console.log(`[Teslemetry Trip] Parked detected for user=${connection.userId} - starting ${PARKED_CONFIRMATION_MS / 1000}s confirmation`);
+  if (!connection.tripInProgress) {
+    if (hasGps && movedMeters > 30) {
+      const locationName = await reverseGeocode(lat!, lon!);
+      const initialWaypoints: Array<[number, number]> = [[lat!, lon!]];
       const updates = {
         ...updateFields,
-        lastPolledAt: now,
-        lastDriveState: "parked",
-        lastShiftState: shiftState || "P",
-        parkedSince: now,
-      };
-      await storage.updateTeslaConnection(connection.id, updates);
-      return { ...connection, ...updates } as TeslaConnection;
-    }
-
-    const parkedDuration = now.getTime() - new Date(connection.parkedSince).getTime();
-
-    if (parkedDuration >= PARKED_CONFIRMATION_MS) {
-      console.log(`[Teslemetry Trip] Park confirmed after ${Math.round(parkedDuration / 1000)}s for user=${connection.userId} - ending trip`);
-      const tripWaypoints: Array<[number, number]> = Array.isArray(connection.routeWaypoints) ? (connection.routeWaypoints as Array<[number, number]>) : [];
-      await completeTripFromWebhook(connection, lat, lon, odometerKm, tripWaypoints);
-      const updates = {
-        ...updateFields,
-        lastPolledAt: now,
-        lastDriveState: "parked",
-        lastShiftState: shiftState || "P",
-        pollState: "awake_idle",
-        tripInProgress: false,
-        tripStartTime: null,
-        tripStartOdometer: null,
-        tripStartLatitude: null,
-        tripStartLongitude: null,
-        tripStartLocation: null,
-        routeWaypoints: null,
+        lastDriveState: "driving",
+        pollState: "active_trip",
+        tripInProgress: true,
+        tripStartTime: now,
+        tripStartOdometer: odometerKm,
+        tripStartLatitude: lat ?? null,
+        tripStartLongitude: lon ?? null,
+        tripStartLocation: locationName,
+        routeWaypoints: initialWaypoints,
         parkedSince: null,
-        idleSince: new Date(),
+        idleSince: null,
       };
       await storage.updateTeslaConnection(connection.id, updates);
-      return { ...connection, ...updates, tripInProgress: false } as TeslaConnection;
+      console.log(`[Trip] STARTED for user=${connection.userId} at ${locationName} (moved ${movedMeters.toFixed(0)}m)`);
+      return { ...connection, ...updates, tripInProgress: true } as TeslaConnection;
     }
 
-    const updates = {
-      ...updateFields,
-      lastPolledAt: now,
-      lastDriveState: "parked",
-      lastShiftState: shiftState || "P",
-    };
-    await storage.updateTeslaConnection(connection.id, updates);
-    return { ...connection, ...updates } as TeslaConnection;
+    await storage.updateTeslaConnection(connection.id, updateFields);
+    return { ...connection, ...updateFields } as TeslaConnection;
+  }
+
+  const existingWaypoints: Array<[number, number]> = Array.isArray(connection.routeWaypoints)
+    ? (connection.routeWaypoints as Array<[number, number]>) : [];
+
+  if (hasGps) {
+    const lastWp = existingWaypoints[existingWaypoints.length - 1];
+    if (!lastWp || haversineDistance(lastWp[0], lastWp[1], lat!, lon!) > 15) {
+      existingWaypoints.push([lat!, lon!]);
+    }
   }
 
   const updates = {
     ...updateFields,
-    lastDriveState: isParked ? "parked" : "online",
+    lastDriveState: "driving",
+    routeWaypoints: existingWaypoints,
   };
   await storage.updateTeslaConnection(connection.id, updates);
+  console.log(`[Trip] GPS update user=${connection.userId} moved=${movedMeters.toFixed(0)}m waypoints=${existingWaypoints.length}`);
   return { ...connection, ...updates } as TeslaConnection;
+}
+
+async function endTrip(connection: TeslaConnection, reason: string): Promise<TeslaConnection> {
+  const tripWaypoints: Array<[number, number]> = Array.isArray(connection.routeWaypoints)
+    ? (connection.routeWaypoints as Array<[number, number]>) : [];
+  const endLat = connection.lastLatitude ? Number(connection.lastLatitude) : undefined;
+  const endLon = connection.lastLongitude ? Number(connection.lastLongitude) : undefined;
+
+  let endOdo = connection.lastOdometer ? Number(connection.lastOdometer) : null;
+  try {
+    const token = getTeslemetryToken();
+    if (token && connection.vin) {
+      console.log(`[Trip] Fetching final odometer from Teslemetry API for trip end`);
+      const vehicleData = await fetchTeslemetryVehicleData(connection.vin);
+      const apiOdo = vehicleData?.vehicle_state?.odometer;
+      if (apiOdo != null && apiOdo > 0) {
+        const apiOdoKm = apiOdo * 1.60934;
+        if (endOdo == null || apiOdoKm > endOdo) {
+          endOdo = apiOdoKm;
+        }
+      }
+    }
+  } catch (err: any) {
+    console.log(`[Trip] Could not fetch final odometer: ${err.message?.substring(0, 100)}`);
+  }
+
+  await completeTripFromWebhook(connection, endLat, endLon, endOdo, tripWaypoints);
+  const updates = {
+    lastPolledAt: new Date(),
+    lastDriveState: "parked",
+    pollState: "awake_idle",
+    tripInProgress: false,
+    tripStartTime: null,
+    tripStartOdometer: null,
+    tripStartLatitude: null,
+    tripStartLongitude: null,
+    tripStartLocation: null,
+    routeWaypoints: null,
+    parkedSince: null,
+    idleSince: new Date(),
+  };
+  await storage.updateTeslaConnection(connection.id, updates);
+  console.log(`[Trip] ENDED (${reason}) for user=${connection.userId} waypoints=${tripWaypoints.length}`);
+  return { ...connection, ...updates, tripInProgress: false } as TeslaConnection;
 }
 
 export async function fetchTeslemetryVehicles(): Promise<any[]> {

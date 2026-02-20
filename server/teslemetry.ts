@@ -510,6 +510,10 @@ async function processOneEvent(ev: any, connection: TeslaConnection): Promise<Te
   const isStateOnly = !hasGps && odometerKm == null && ev.shiftState == null;
 
   if (isStateOnly) {
+    const stateUpdate: Record<string, any> = { lastPolledAt: new Date() };
+    if (ev.vehicleState === "offline" || ev.vehicleState === "asleep") {
+      stateUpdate.lastDriveState = ev.vehicleState;
+    }
     if (connection.tripInProgress && connection.lastGpsAt) {
       const eventTime = ev.createdAt ? new Date(ev.createdAt).getTime() : Date.now();
       const lastGpsTime = new Date(connection.lastGpsAt).getTime();
@@ -519,6 +523,10 @@ async function processOneEvent(ev: any, connection: TeslaConnection): Promise<Te
         console.log(`[Trip] GPS stale ${gpsAgeSec}s, ending trip for user=${connection.userId}`);
         return await endTrip(connection, "gps_timeout");
       }
+    }
+    if (Object.keys(stateUpdate).length > 1) {
+      await storage.updateTeslaConnection(connection.id, stateUpdate);
+      return { ...connection, ...stateUpdate } as TeslaConnection;
     }
     return connection;
   }

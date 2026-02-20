@@ -138,7 +138,6 @@ interface TelemetryData {
   latitude?: number | null;
   longitude?: number | null;
   batteryLevel?: number | null;
-  chargingState?: string | null;
   vehicleState?: string | null;
 }
 
@@ -231,10 +230,6 @@ function parseWebhookPayload(body: any): TelemetryData | null {
           case "BatteryLevel":
             result.batteryLevel = getNumeric();
             break;
-          case "ChargingState":
-          case "DetailedChargeState":
-            result.chargingState = getString();
-            break;
         }
         continue;
       }
@@ -270,8 +265,6 @@ function parseWebhookPayload(body: any): TelemetryData | null {
       result.longitude = data.Location.longitude ?? null;
     }
     if (data.BatteryLevel !== undefined) result.batteryLevel = parseFloat(String(data.BatteryLevel));
-    if (data.ChargingState !== undefined) result.chargingState = String(data.ChargingState);
-    if (data.DetailedChargeState !== undefined) result.chargingState = String(data.DetailedChargeState);
   }
 
   return result;

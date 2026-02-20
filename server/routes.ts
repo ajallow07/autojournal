@@ -231,12 +231,11 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Unauthorized" });
       }
     }
+    res.status(200).json({ ok: true });
     try {
-      const result = await ingestTelemetryWebhook(req.body);
-      res.status(200).json(result);
+      await ingestTelemetryWebhook(req.body);
     } catch (error: any) {
       console.error("[Teslemetry Webhook] Ingestion error:", error.message);
-      res.status(500).json({ error: error.message });
     }
   });
 

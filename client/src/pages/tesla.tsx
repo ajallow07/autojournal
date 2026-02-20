@@ -791,7 +791,7 @@ function TelemetryLog() {
                   </tr>
                 </thead>
                 <tbody>
-                  {events.map((ev) => (
+                  {[...events].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).map((ev) => (
                     <tr key={ev.id} className="border-t">
                       <td className="p-2 whitespace-nowrap">
                         {new Date(ev.createdAt).toLocaleString("sv-SE", {

@@ -427,6 +427,9 @@ export async function ingestTelemetryWebhook(body: any): Promise<{ accepted: boo
   const hasTelemetryData = telemetry.odometer != null || telemetry.shiftState != null || telemetry.latitude != null;
 
   if (!hasTelemetryData) {
+    if (telemetry.batteryLevel != null) {
+      await updateVehicleFromTelemetry(connection, null, telemetry.batteryLevel);
+    }
     return { accepted: true };
   }
 

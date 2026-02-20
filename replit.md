@@ -4,6 +4,12 @@
 Mahlis Auto Journal — a smart driver's journal application for logging and managing car trips for Tesla vehicles, based in Stockholm, Sweden. Supports multi-user authentication (Google OAuth, username/password), business/private trip classification, odometer tracking, comprehensive reports with CSV export, and Teslemetry webhook integration for automatic trip logging.
 
 ## Recent Changes
+- 2026-02-20: Major trip detection fix: state-only offline webhooks no longer kill active trips; GPS movement is the primary driving indicator
+- 2026-02-20: Added lastGpsAt column to tesla_connections for tracking last real GPS timestamp
+- 2026-02-20: Trips end after 5min without GPS data (GPS_STALE_MS), not immediately on offline state
+- 2026-02-20: Lowered movement thresholds: 30m GPS / 50m odometer for better residential driving detection
+- 2026-02-20: State-only events (no telemetry data) skip trip detection entirely to avoid stale auto-fetch confusion
+- 2026-02-20: Reverse geocoding now includes house numbers (zoom=18) for precise street addresses
 - 2026-02-19: OSRM road-snapped route matching: GPS waypoints are snapped to actual roads via OSRM route API when trips complete
 - 2026-02-19: routeGeometry jsonb column on trips stores road-matched geometry; TripMap prefers routeGeometry over raw routeCoordinates
 - 2026-02-19: New endpoint: POST /api/trips/rematch-routes to re-process existing trips with road matching

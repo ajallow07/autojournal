@@ -71,6 +71,7 @@ export const teslaConnections = pgTable("tesla_connections", {
   lastShiftState: text("last_shift_state"),
   parkedSince: timestamp("parked_since"),
   routeWaypoints: jsonb("route_waypoints"),
+  lastGpsAt: timestamp("last_gps_at"),
   pollState: text("poll_state").notNull().default("deep_sleep"),
   idleSince: timestamp("idle_since"),
   lastApiErrorAt: timestamp("last_api_error_at"),

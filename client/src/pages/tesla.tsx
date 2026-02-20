@@ -744,7 +744,7 @@ function TelemetryLog() {
           </div>
         </div>
         <CardDescription>
-          Last 24 hours of vehicle data. Older events are automatically cleaned up.
+          Last 2 hours of vehicle data. Older events are automatically cleaned up.
         </CardDescription>
       </CardHeader>
       {expanded && (
